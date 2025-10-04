@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "node server.js"
-  },
+  "start": "node server.js",
+  "dev": "node server.js"
+},
   "dependencies": {
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "body-parser": "^1.20.3",
