@@ -326,8 +326,9 @@ app.post('/call', async (req, res) => {
   };
 
   try {
-    if (!userRequest.clinicPhone) throw new Error('Required parameter "params[\\'to\\']" missing.');
-    const callSid = await startClinicCall({
+    if (!userRequest.clinicPhone) 
+      throw new Error("Required parameter \"params['to']\" missing.");
+      const callSid = await startClinicCall({
       to: userRequest.clinicPhone,
       name: userRequest.name,
       reason: userRequest.reason,
