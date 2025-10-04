@@ -1,0 +1,18 @@
+# Node modules
+node_modules/
+backend/node_modules/
+
+# Environment files (secrets)
+backend/.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS metadata
+.DS_Store
+Thumbs.db
+backend/.env.backup
+backend/.env.backup
+*.env
+*.backup

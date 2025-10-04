@@ -1,0 +1,21 @@
+{
+  "name": "ai-healthcare-caller",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@googlemaps/google-maps-services-js": "^3.4.2",
+    "body-parser": "^1.20.3",
+    "bullmq": "^5.59.0",
+    "chrono-node": "^2.9.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "ioredis": "^5.8.0",
+    "luxon": "^3.7.2",
+    "openai": "^4.104.0",
+    "twilio": "^4.23.0",
+    "uuid": "^9.0.1"
+  }
+}
