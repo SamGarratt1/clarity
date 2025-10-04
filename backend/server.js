@@ -1,4 +1,3 @@
-// server.js
 import 'dotenv/config';
 import express from 'express';
 import bodyParser from 'body-parser';
@@ -7,8 +6,6 @@ import twilioPkg from 'twilio';
 import OpenAI from 'openai';
 import * as chrono from 'chrono-node';
 import { Client as GoogleMapsClient } from '@googlemaps/google-maps-services-js';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
 // ---------- ENV ----------
 const {
@@ -34,7 +31,7 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// (nice to have small root + health)
+// small root + health
 app.get('/', (_req, res) => res.type('text/plain').send('Clarity backend alive'));
 app.get('/healthz', (_req, res) => {
   const checks = {
@@ -49,7 +46,6 @@ app.get('/healthz', (_req, res) => {
 
 // ---------- Helpers ----------
 function speak(twiml, text) {
-  // Formal but warm voice; Polly works on Twilio <Say> when enabled on the account
   twiml.say({ voice: TTS_VOICE }, text);
 }
 
@@ -67,7 +63,7 @@ const smsSessions         = new Map(); // sms state per patient (key: From)
 const lastCallByPatient   = new Map(); // last call details per patient (key: From)
 const pendingRetries      = new Map(); // scheduled retry timers (key: From)
 
-// NEW: preferred clinics per patient (key = patient phone)
+// preferred clinics per patient (key = patient phone)
 const preferredClinicsByPatient = new Map();
 function getPreferredClinics(patientPhone) {
   return preferredClinicsByPatient.get(patientPhone) || [];
@@ -109,13 +105,7 @@ const ynToBool    = s => /^y/i.test(s||'');
 const isValidTime = s => timeRe.test((s||'').trim());
 const isValidDate = s => dateRe.test((s||'').trim());
 
-// Bulk intake parser: expects labeled lines in one SMS
-// Example:
-// Name: Doe, Jane
-// Symptoms: sore throat, fever
-// ZIP: 30309
-// Insurance: Y
-// Preferred: 10/05/2025, 10:30 AM
+// Bulk intake parser
 function parseBulkIntake(text) {
   const lines = (text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const obj = {};
@@ -130,21 +120,16 @@ function parseBulkIntake(text) {
     else if (key.startsWith('insur')) obj.insurance = val;
     else if (key.startsWith('preferred')) obj.preferred = val;
   }
-  // validate
   const nameOk = obj.name && isValidNameLF(obj.name);
   const zipOk  = obj.zip && isValidZip(obj.zip);
   const insOk  = obj.insurance && isValidYN(obj.insurance);
   let dateStr = '', timeStr = '';
   if (obj.preferred) {
     const parts = obj.preferred.split(',').map(s => s.trim());
-    if (parts.length >= 2) {
-      dateStr = parts[0];
-      timeStr = parts[1];
-    }
+    if (parts.length >= 2) { dateStr = parts[0]; timeStr = parts[1]; }
   }
   const dateOk = isValidDate(dateStr);
   const timeOk = isValidTime(timeStr);
-
   if (!nameOk || !zipOk || !insOk || !dateOk || !timeOk || !obj.symptoms) return null;
   const nameParsed = parseNameLF(obj.name);
   return {
@@ -198,7 +183,7 @@ async function findClinics(zip, specialty = 'clinic') {
       address: p.vicinity || p.formatted_address || '',
       rating: p.rating || null,
       location: p.geometry?.location,
-      phone: null // (MVP) phone requires Place Details; add later if you want
+      phone: null // (MVP) fetch via Place Details later
     }));
   } catch (e) {
     console.error('Maps API error:', e.message);
@@ -208,7 +193,6 @@ async function findClinics(zip, specialty = 'clinic') {
 
 // ---------- GPT ----------
 function buildSystemPrompt(userReq) {
-  // First/Last format (more natural)
   const nameText = userReq.name || 'John Doe';
   return `
 You are a polite, concise patient concierge calling a clinic to book an appointment.
@@ -260,13 +244,12 @@ async function startClinicCall({ to, name, reason, preferredTimes, clinicName, c
     transcript: [],
     status: 'in_progress',
     confirmed: null,
-    awaitingBring: false, // NEW: after time is confirmed, ask what to bring
+    awaitingBring: false,
     turns: 0,
     startedAt: Date.now(),
     onHoldSince: null
   });
 
-  // remember for SMS-driven retry and SAVE CLINIC
   lastCallByPatient.set(callback, { to, name, reason, preferredTimes, clinicName, callback });
 
   return call.sid;
@@ -328,9 +311,7 @@ app.post('/profile/clinic', (req, res) => {
 
 // Start call (manual/programmatic)
 app.post('/call', async (req, res) => {
-  // helpful debug:
   console.log('POST /call body:', req.body);
-
   const userRequest = {
     name: req.body.name,
     reason: req.body.reason,
@@ -345,7 +326,7 @@ app.post('/call', async (req, res) => {
   };
 
   try {
-    if (!userRequest.clinicPhone) throw new Error('Required parameter "params[\'to\']" missing.');
+    if (!userRequest.clinicPhone) throw new Error('Required parameter "params[\\'to\\']" missing.');
     const callSid = await startClinicCall({
       to: userRequest.clinicPhone,
       name: userRequest.name,
@@ -364,8 +345,8 @@ app.post('/call', async (req, res) => {
 app.post('/voice', async (req, res) => {
   const callSid = req.body.CallSid;
   const twiml = new twilioPkg.twiml.VoiceResponse();
-
   const session = sessions.get(callSid);
+
   if (!session) {
     speak(twiml, 'I lost the call context. Goodbye.');
     twiml.hangup();
@@ -379,8 +360,8 @@ app.post('/voice', async (req, res) => {
     `Do you have availability ${session.userRequest.preferredTimes?.[0] || 'this week'}?`;
 
   session.transcript.push({ from: 'ai', text: firstLine });
-
   speak(twiml, firstLine);
+
   const gather = twiml.gather({
     input: 'speech',
     action: '/gather',
@@ -405,7 +386,6 @@ app.post('/gather', async (req, res) => {
     return res.type('text/xml').send(twiml.toString());
   }
 
-  // total call cap
   const elapsedMs = Date.now() - (session.startedAt || Date.now());
   if (elapsedMs > MAX_CALL_MS) {
     speak(twiml, "I have to wrap here. We'll follow up by text. Thank you.");
@@ -456,7 +436,7 @@ app.post('/gather', async (req, res) => {
     session.onHoldSince = null;
   }
 
-  // path: if we just asked “what to bring”, capture that now
+  // after we ask “what to bring”, capture that
   if (session.awaitingBring) {
     const bringText = speech || 'No special items';
     session.confirmed = session.confirmed || {};
@@ -466,7 +446,6 @@ app.post('/gather', async (req, res) => {
     session.transcript.push({ from: 'ai', text: thanks });
     speak(twiml, thanks);
     twiml.hangup();
-    // SMS patient with full confirmation
     try {
       const clinicName = session.userRequest.clinicName || 'the clinic';
       const when = session.confirmed.time || '(time pending)';
@@ -480,7 +459,7 @@ app.post('/gather', async (req, res) => {
     return res.type('text/xml').send(twiml.toString());
   }
 
-  // basic intent
+  // intent detection
   let intent = 'other';
   if (/\b(yes|yeah|yep|works|okay|ok|sure|that[’']?s fine|perfect|sounds good)\b/i.test(lower)) intent = 'yes';
   else if (/\b(no|nope|not available|can[’']?t|unavailable)\b/i.test(lower)) intent = 'no';
@@ -491,4 +470,327 @@ app.post('/gather', async (req, res) => {
   if (intent === 'time') {
     const parsedDate = chrono.parseDate(speech, new Date());
     const cleanTime = parsedDate
-      ? parsedDate.toLocaleString('en-US',
+      ? parsedDate.toLocaleString('en-US', { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+      : speech;
+    session.confirmed = { ...(session.confirmed||{}), time: cleanTime };
+    const confirmLine = `Great, I have you down for ${cleanTime} for patient ${session.userRequest.name}. Can you confirm?`;
+    session.transcript.push({ from: 'ai', text: confirmLine });
+    speak(twiml, confirmLine);
+    twiml.gather({ input: 'speech', action: '/gather', method: 'POST', speechTimeout: 'auto', timeout: 6 });
+    return res.type('text/xml').send(twiml.toString());
+  }
+
+  if (intent === 'yes' && session.confirmed?.time) {
+    const askBring = `Thank you. Is there anything that ${session.userRequest.name} needs to bring?`;
+    session.awaitingBring = true;
+    session.transcript.push({ from: 'ai', text: askBring });
+    const g = twiml.gather({ input: 'speech', action: '/gather', method: 'POST', speechTimeout: 'auto', timeout: 7 });
+    speak(g, askBring);
+    return res.type('text/xml').send(twiml.toString());
+  }
+
+  if (intent === 'no') {
+    const retry = 'No problem. Could you share another available time—morning or afternoon works too?';
+    session.transcript.push({ from: 'ai', text: retry });
+    speak(twiml, retry);
+    twiml.gather({ input: 'speech', action: '/gather', method: 'POST', speechTimeout: 'auto', timeout: 6 });
+    return res.type('text/xml').send(twiml.toString());
+  }
+
+  // fallback to GPT or polite repeat
+  let reply;
+  try { reply = await nextAIUtterance(callSid); }
+  catch { reply = "I didn't catch that. Could you share an available day and time?"; }
+
+  session.transcript.push({ from: 'ai', text: reply });
+  speak(twiml, reply);
+  const g = twiml.gather({ input: 'speech', action: '/gather', method: 'POST', speechTimeout: 'auto', timeout: 6 });
+  speak(g, "I'm listening.");
+  return res.type('text/xml').send(twiml.toString());
+});
+
+// Call status → SMS retry prompt
+app.post('/status', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const callStatus = (req.body.CallStatus || '').toLowerCase();
+  const session = sessions.get(callSid);
+  if (!session) return res.sendStatus(200);
+
+  if (callStatus === 'completed' && session.status !== 'confirmed') {
+    try {
+      await client.messages.create({
+        to: session.userRequest.callback,
+        from: TWILIO_CALLER_ID,
+        body: `The clinic ended the call before we could confirm. Reply RETRY to try again, or WAIT 5 / WAIT 15 / CANCEL.`
+      });
+    } catch {}
+  }
+
+  if (/(failed|busy|no-answer|canceled)/i.test(callStatus)) {
+    try {
+      await client.messages.create({
+        to: session.userRequest.callback,
+        from: TWILIO_CALLER_ID,
+        body: `Call didn’t go through (${callStatus}). Reply RETRY to try again, or WAIT 5 / WAIT 15 / CANCEL.`
+      });
+    } catch {}
+  }
+
+  return res.sendStatus(200);
+});
+
+// ---------- SMS webhook ----------
+app.post('/sms', async (req, res) => {
+  const MessagingResponse = twilioPkg.twiml.MessagingResponse;
+  const twiml = new MessagingResponse();
+
+  const from  = (req.body.From || '').trim();
+  const raw   = (req.body.Body || '');
+  const body  = raw.trim();
+  const lower = body.toLowerCase();
+
+  const send = (text) => { twiml.message(text); return res.type('text/xml').send(twiml.toString()); };
+
+  // A2P keywords
+  if (/\b(stop|end|unsubscribe|quit|cancel)\b/.test(lower)) {
+    cancelRetry(from);
+    return send("You’re opted out and won’t receive more texts. Reply START to opt back in.");
+  }
+  if (/\b(start)\b/.test(lower)) return send("You’re opted in. Reply HELP for info.");
+  if (/\b(help)\b/.test(lower))  return send(`${BRAND_NAME}: Msg&data rates may apply. Reply STOP to opt out.`);
+
+  // Retry controls available anytime
+  if (/\b(retry|now|call\s*again|call\s*back)\b/.test(lower)) {
+    const details = lastCallByPatient.get(from);
+    if (!details || !details.to) return send("I don’t have a clinic on file to call back. Start a new request first.");
+    cancelRetry(from);
+    try {
+      await startClinicCall(details);
+      return send(`Calling ${details.clinicName} again now. I’ll text the result.`);
+    } catch {
+      return send(`Couldn’t place the call just now. Reply RETRY again in a moment, or WAIT 5 / WAIT 15.`);
+    }
+  }
+  if (/\bwait\s*5\b/.test(lower)) {
+    const details = lastCallByPatient.get(from);
+    if (!details || !details.to) return send("No clinic on file. Start a new request first.");
+    cancelRetry(from);
+    scheduleRetry(from, details, SHORT_WAIT_MS);
+    return send("Okay—will retry in 5 minutes.");
+  }
+  if (/\bwait\s*15\b/.test(lower)) {
+    const details = lastCallByPatient.get(from);
+    if (!details || !details.to) return send("No clinic on file. Start a new request first.");
+    cancelRetry(from);
+    scheduleRetry(from, details, DEFAULT_RETRY_MS);
+    return send("Got it—will retry in 15 minutes.");
+  }
+  if (/^cancel$/.test(lower)) {
+    const cancelled = cancelRetry(from);
+    return send(cancelled ? "Okay, cancelled the scheduled retry." : "No retry was scheduled.");
+  }
+
+  // Preferred clinic SMS commands
+  if (/^my\s+clinic\s*:/i.test(body)) {
+    const after = body.split(/:/i)[1] || '';
+    const parts = after.split('|').map(s => s.trim());
+    const name = parts[0] || '';
+    const phone = parts[1] || '';
+    const address = parts[2] || '';
+    if (!name || !phone) return send('Please use: MY CLINIC: Name | +1XXXXXXXXXX | Address (optional)');
+    savePreferredClinic(from, { name, phone, address });
+    const list = getPreferredClinics(from);
+    return send(`Saved. You now have ${list.length} clinic${list.length>1?'s':''} on file.\nReply CLINICS to view, or NEW to start a booking.`);
+  }
+  if (/^clinics$/i.test(body)) {
+    const list = getPreferredClinics(from);
+    if (!list.length) return send('No clinics saved. Add one with:\nMY CLINIC: Name | +1XXXXXXXXXX | Address');
+    const lines = list.map((c,i)=>`${i+1}) ${c.name}${c.phone?' — '+c.phone:''}${c.address?' — '+c.address:''}`);
+    return send(`Your clinics:\n${lines.join('\n')}\n\nReply NEW to start, or CLEAR CLINICS to remove all.`);
+  }
+  if (/^clear\s+clinics$/i.test(body)) {
+    preferredClinicsByPatient.delete(from);
+    return send('Cleared your saved clinics.');
+  }
+  if (/^save\s+clinic$/i.test(body)) {
+    const last = lastCallByPatient.get(from);
+    if (!last || !last.clinicName || !last.to) return send(`I don’t have a recent clinic to save. Try again after a booking.`);
+    savePreferredClinic(from, { name: last.clinicName, phone: last.to, address: '' });
+    return send(`Saved ${last.clinicName}. Reply CLINICS to view.`);
+  }
+
+  // SMS session
+  let s = smsSessions.get(from);
+
+  // Start NEW / RESET at any time
+  if (!s || /\b(new|restart|reset)\b/.test(lower)) {
+    smsSessions.set(from, { state: 'await_bulk' });
+    return send(
+      `Welcome to ${BRAND_NAME} — ${BRAND_SLOGAN}.\n` +
+      `Please reply in ONE message using this format:\n\n` +
+      `Name: Last, First\n` +
+      `Symptoms: <brief>\n` +
+      `ZIP: 12345\n` +
+      `Insurance: Y/N\n` +
+      `Preferred: MM/DD/YYYY, HH:MM AM/PM\n\n` +
+      `Example:\n` +
+      `Name: Doe, Jane\nSymptoms: sore throat, fever\nZIP: 30309\nInsurance: Y\nPreferred: 10/05/2025, 10:30 AM\n\n` +
+      `Tip: Save your usual clinic now:\nMY CLINIC: Midtown Family Practice | +1 555 123 4567 | 123 Main St`
+    );
+  }
+
+  // Intake: expect the one-shot bulk message
+  if (s.state === 'await_bulk') {
+    const parsed = parseBulkIntake(body);
+    if (!parsed) {
+      return send(
+        `I couldn’t read that. Please copy this template and fill it in:\n\n` +
+        `Name: Last, First\nSymptoms: <brief>\nZIP: 12345\nInsurance: Y/N\nPreferred: MM/DD/YYYY, HH:MM AM/PM`
+      );
+    }
+    const specialty = inferSpecialty(parsed.symptoms);
+    s = {
+      state: 'choose_source', // choose preferred vs nearby
+      patientName: parsed.patientName,
+      firstName: parsed.firstName,
+      lastName: parsed.lastName,
+      nameLF: parsed.nameLF,
+      symptoms: parsed.symptoms,
+      zip: parsed.zip,
+      insuranceY: parsed.insuranceY,
+      dateStr: parsed.dateStr,
+      timeStr: parsed.timeStr,
+      windowText: parsed.windowText,
+      specialty
+    };
+    smsSessions.set(from, s);
+
+    const mine = getPreferredClinics(from);
+    if (mine.length) {
+      s.preferredList = mine;
+      s.chosenClinic = null;
+      smsSessions.set(from, s);
+      const listStr = mine.slice(0,3).map((c,i)=>`${i+1}) ${c.name}${c.address? ' — '+c.address : ''}`).join('\n');
+      return send(
+        `Would you like me to try your usual clinic first?\n` +
+        `${listStr}${mine.length>3?`\n…and ${mine.length-3} more.`:''}\n\n` +
+        `Reply MINE to use #1, MINE 2 (or 3) to pick another, or NEARBY to search clinics near ${s.zip}.`
+      );
+    }
+
+    // no saved clinics → search nearby
+    const clinics = await findClinics(s.zip, s.specialty);
+    s.clinics = clinics;
+    const top = clinics[0];
+    if (!top) {
+      s.state = 'await_bulk';
+      smsSessions.set(from, s);
+      return send(`I couldn’t find clinics nearby. Reply RESET to try again with a different ZIP or symptoms.`);
+    }
+    s.state = 'select_clinic';
+    s.chosenClinic = { name: top.name, phone: top.phone, address: top.address };
+    smsSessions.set(from, s);
+
+    return send(
+      `Found: ${top.name}${top.address ? ' — ' + top.address : ''}\n` +
+      `Book for ${s.windowText}? Reply YES to call, or NEXT for another option.\n` +
+      `Tip: Save your own clinic with "MY CLINIC: Name | +1XXXXXXXXXX".`
+    );
+  }
+
+  // Choose preferred vs nearby
+  if (s.state === 'choose_source') {
+    // MINE [index]
+    const mMine = body.match(/^mine\s*(\d+)?$/i);
+    if (mMine) {
+      const idx = Math.max(1, parseInt(mMine[1]||'1',10)) - 1;
+      const mine = s.preferredList || [];
+      const pick = mine[idx];
+      if (!pick) return send(`I don’t have that index. Reply MINE for #1, MINE 2, or NEARBY.`);
+      if (!pick.phone) return send(`Your saved clinic doesn’t have a phone on file. Update it via:\nMY CLINIC: Name | +1XXXXXXXXXX | Address`);
+      s.state = 'calling';
+      s.chosenClinic = { name: pick.name, phone: pick.phone, address: pick.address };
+      smsSessions.set(from, s);
+      try {
+        await startClinicCall({
+          to: pick.phone,
+          name: s.patientName,
+          reason: s.symptoms,
+          preferredTimes: [s.windowText],
+          clinicName: pick.name,
+          callback: from
+        });
+        return send(`Calling ${pick.name} now to book for ${s.windowText}. I’ll text you the confirmation.\nIf it fails, reply RETRY / WAIT 5 / WAIT 15 / CANCEL.`);
+      } catch {
+        return send(`Couldn’t start the call just now. Reply MINE again or NEARBY to search alternatives.`);
+      }
+    }
+
+    // NEARBY
+    if (/^nearby$/i.test(body)) {
+      const clinics = await findClinics(s.zip, s.specialty);
+      s.clinics = clinics;
+      const top = clinics[0];
+      if (!top) {
+        s.state = 'await_bulk';
+        smsSessions.set(from, s);
+        return send(`I couldn’t find clinics nearby. Reply RESET to try again with a different ZIP or symptoms.`);
+      }
+      s.state = 'select_clinic';
+      s.chosenClinic = { name: top.name, phone: top.phone, address: top.address };
+      smsSessions.set(from, s);
+      return send(
+        `Found: ${top.name}${top.address ? ' — ' + top.address : ''}\n` +
+        `Book for ${s.windowText}? Reply YES to call, or NEXT for another option.`
+      );
+    }
+
+    return send(`Reply MINE (or MINE 2) to use your saved clinic, or NEARBY to search clinics.`);
+  }
+
+  // Selecting/confirming clinic (NEARBY flow)
+  if (s.state === 'select_clinic') {
+    if (/^yes\b/i.test(body)) {
+      if (!s?.chosenClinic?.phone) {
+        return send(`This clinic didn’t list a phone. Reply NEXT for another option or RESET to start over.`);
+      }
+      try {
+        await startClinicCall({
+          to: s.chosenClinic.phone,
+          name: s.patientName,
+          reason: s.symptoms,
+          preferredTimes: [s.windowText],
+          clinicName: s.chosenClinic.name,
+          callback: from
+        });
+        s.state = 'calling';
+        smsSessions.set(from, s);
+        return send(`Calling ${s.chosenClinic.name} now to book for ${s.windowText}. I’ll text you the confirmation.\nIf it fails, reply RETRY / WAIT 5 / WAIT 15 / CANCEL.`);
+      } catch {
+        return send(`Couldn’t start the call just now. Reply YES again in a moment, or NEXT for another option.`);
+      }
+    }
+    if (/^next\b/i.test(body)) {
+      const list = s.clinics || [];
+      const idx = list.findIndex(c => c.name === s.chosenClinic?.name);
+      const next = list[idx + 1];
+      if (!next) return send('No more options nearby. Reply RESET to start over or change ZIP.');
+      s.chosenClinic = { name: next.name, phone: next.phone, address: next.address };
+      smsSessions.set(from, s);
+      return send(`Next: ${next.name}${next.address ? ' — ' + next.address : ''}\nBook for ${s.windowText}? Reply YES to call, or NEXT for another option.`);
+    }
+    return send(`Reply YES to call this clinic, or NEXT for another option.`);
+  }
+
+  // If we reach here while calling/in-between
+  if (s.state === 'calling') {
+    return send(`I’m on it. I’ll text you once I confirm the time. You can also reply RETRY / WAIT 5 / WAIT 15 / CANCEL.`);
+  }
+
+  return send(`Reply NEW to begin a booking. To save your usual clinic: MY CLINIC: Name | +1XXXXXXXXXX | Address`);
+});
+
+// ---------- Server ----------
+app.listen(PORT, () => {
+  console.log(`Concierge listening on :${PORT}`);
+});
