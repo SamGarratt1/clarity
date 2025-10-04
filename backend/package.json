@@ -2,10 +2,14 @@
   "name": "ai-healthcare-caller",
   "version": "0.1.0",
   "type": "module",
+  "main": "server.js",
   "scripts": {
-  "start": "node server.js",
-  "dev": "node server.js"
-},
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "body-parser": "^1.20.3",
