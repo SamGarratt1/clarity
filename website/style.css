@@ -1,0 +1,53 @@
+body {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  background: #f9fafc;
+  color: #222;
+  line-height: 1.6;
+  margin: 0;
+  padding: 0;
+}
+
+header {
+  background: #0078ff;
+  color: white;
+  text-align: center;
+  padding: 2em 1em;
+}
+
+main {
+  max-width: 800px;
+  margin: 2em auto;
+  padding: 0 1em;
+}
+
+h1, h2 {
+  margin-bottom: 0.5em;
+}
+
+.hero {
+  text-align: center;
+  padding: 2em 0;
+}
+
+.cta {
+  font-size: 1.2em;
+  font-weight: bold;
+  margin-top: 1em;
+}
+
+.legal {
+  font-size: 0.8em;
+  color: #666;
+}
+
+footer {
+  background: #eee;
+  text-align: center;
+  padding: 1em;
+  margin-top: 2em;
+}
+
+footer a {
+  color: #0078ff;
+  text-decoration: none;
+}
