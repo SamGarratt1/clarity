@@ -49,11 +49,8 @@ function speak(twiml, text) {
   twiml.say({ voice: TTS_VOICE }, text);
 }
 
-// limits & safety rails
 const MAX_CALL_MS   = 3 * 60 * 1000;  // 3 min
 const MAX_HOLD_MS   = 90 * 1000;      // 90s on hold
-
-// retry scheduler
 const DEFAULT_RETRY_MS = 15 * 60 * 1000; // 15 min
 const SHORT_WAIT_MS    = 5  * 60 * 1000; // 5 min
 
@@ -105,45 +102,37 @@ const ynToBool    = s => /^y/i.test(s||'');
 const isValidTime = s => timeRe.test((s||'').trim());
 const isValidDate = s => dateRe.test((s||'').trim());
 
-// Bulk intake parser
-function parseBulkIntake(text) {
-  const lines = (text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const obj = {};
-  for (const line of lines) {
-    const m = line.match(/^([A-Za-z ]+)\s*:\s*(.+)$/);
-    if (!m) continue;
-    const key = m[1].toLowerCase().trim();
-    const val = m[2].trim();
-    if (key.startsWith('name')) obj.name = val;
-    else if (key.startsWith('symptom')) obj.symptoms = val;
-    else if (key === 'zip' || key === 'zipcode' || key === 'postal') obj.zip = val;
-    else if (key.startsWith('insur')) obj.insurance = val;
-    else if (key.startsWith('preferred')) obj.preferred = val;
+// ---------- Conversational intake helpers ----------
+function splitFirstLast(full = '') {
+  const parts = full.trim().replace(/\s+/g,' ').split(' ');
+  if (parts.length < 2) return null;
+  const first = parts.shift();
+  const last  = parts.join(' ');
+  return { first, last };
+}
+
+function nextIntakePrompt(stateObj) {
+  switch (stateObj.state) {
+    case 'intake_name':       return 'What is the patient name? (First Last)';
+    case 'intake_symptoms':   return 'Briefly describe symptoms (e.g., sore throat, fever).';
+    case 'intake_zip':        return 'What is your 5-digit ZIP code?';
+    case 'intake_ins':        return 'Do you have insurance? Reply Y or N.';
+    case 'intake_date':       return 'Preferred date? (MM/DD/YYYY)';
+    case 'intake_time':       return 'Preferred time? (e.g., 10:30 AM)';
+    case 'confirm_intake': {
+      const s = stateObj;
+      const summary =
+        `Please confirm:\n` +
+        `Name: ${s.firstName} ${s.lastName}\n` +
+        `Symptoms: ${s.symptoms}\n` +
+        `ZIP: ${s.zip}\n` +
+        `Insurance: ${s.insuranceY ? 'Y' : 'N'}\n` +
+        `Preferred: ${s.dateStr}, ${s.timeStr}\n` +
+        `Reply YES to continue, or BACK to edit.`;
+      return summary;
+    }
+    default: return 'Say NEW to start.';
   }
-  const nameOk = obj.name && isValidNameLF(obj.name);
-  const zipOk  = obj.zip && isValidZip(obj.zip);
-  const insOk  = obj.insurance && isValidYN(obj.insurance);
-  let dateStr = '', timeStr = '';
-  if (obj.preferred) {
-    const parts = obj.preferred.split(',').map(s => s.trim());
-    if (parts.length >= 2) { dateStr = parts[0]; timeStr = parts[1]; }
-  }
-  const dateOk = isValidDate(dateStr);
-  const timeOk = isValidTime(timeStr);
-  if (!nameOk || !zipOk || !insOk || !dateOk || !timeOk || !obj.symptoms) return null;
-  const nameParsed = parseNameLF(obj.name);
-  return {
-    patientName: nameParsed.full,
-    firstName: nameParsed.first,
-    lastName: nameParsed.last,
-    nameLF: obj.name,
-    symptoms: obj.symptoms,
-    zip: obj.zip,
-    insuranceY: ynToBool(obj.insurance),
-    dateStr,
-    timeStr,
-    windowText: `${dateStr} ${timeStr}`
-  };
 }
 
 // ---------- Maps ----------
@@ -326,9 +315,8 @@ app.post('/call', async (req, res) => {
   };
 
   try {
-    if (!userRequest.clinicPhone) 
-      throw new Error("Required parameter \"params['to']\" missing.");
-      const callSid = await startClinicCall({
+    if (!userRequest.clinicPhone) { throw new Error("Required parameter \"params['to']\" missing."); }
+    const callSid = await startClinicCall({
       to: userRequest.clinicPhone,
       name: userRequest.name,
       reason: userRequest.reason,
@@ -620,88 +608,143 @@ app.post('/sms', async (req, res) => {
     return send(`Saved ${last.clinicName}. Reply CLINICS to view.`);
   }
 
-  // SMS session
+  // --- Conversational intake state machine ---
   let s = smsSessions.get(from);
 
   // Start NEW / RESET at any time
   if (!s || /\b(new|restart|reset)\b/.test(lower)) {
-    smsSessions.set(from, { state: 'await_bulk' });
+    s = {
+      state: 'intake_name',
+      firstName: '', lastName: '', patientName: '',
+      symptoms: '', zip: '', insuranceY: null,
+      dateStr: '', timeStr: '', windowText: '',
+      specialty: ''
+    };
+    smsSessions.set(from, s);
     return send(
       `Welcome to ${BRAND_NAME} — ${BRAND_SLOGAN}.\n` +
-      `Please reply in ONE message using this format:\n\n` +
-      `Name: Last, First\n` +
-      `Symptoms: <brief>\n` +
-      `ZIP: 12345\n` +
-      `Insurance: Y/N\n` +
-      `Preferred: MM/DD/YYYY, HH:MM AM/PM\n\n` +
-      `Example:\n` +
-      `Name: Doe, Jane\nSymptoms: sore throat, fever\nZIP: 30309\nInsurance: Y\nPreferred: 10/05/2025, 10:30 AM\n\n` +
-      `Tip: Save your usual clinic now:\nMY CLINIC: Midtown Family Practice | +1 555 123 4567 | 123 Main St`
+      `I’ll ask a few quick questions to book your appointment.\n` +
+      `You can reply BACK to correct the previous answer or CANCEL to stop.\n\n` +
+      nextIntakePrompt(s)
     );
   }
 
-  // Intake: expect the one-shot bulk message
-  if (s.state === 'await_bulk') {
-    const parsed = parseBulkIntake(body);
-    if (!parsed) {
+  // Global controls
+  if (/^cancel$/.test(lower)) {
+    smsSessions.delete(from);
+    cancelRetry(from);
+    return send('Cancelled. Text NEW anytime to start again.');
+  }
+  if (/^back$/.test(lower)) {
+    if (!s) return send('Nothing to go back to. Text NEW to start.');
+    const order = ['intake_name','intake_symptoms','intake_zip','intake_ins','intake_date','intake_time','confirm_intake'];
+    const idx = order.indexOf(s.state);
+    const prev = Math.max(0, idx - 1);
+    s.state = order[prev];
+    smsSessions.set(from, s);
+    return send(`Okay—let’s go back.\n${nextIntakePrompt(s)}`);
+  }
+
+  // Intake flow
+  if (s && s.state?.startsWith('intake')) {
+
+    if (s.state === 'intake_name') {
+      let firstLast = null;
+      if (isValidNameLF(body)) {
+        const parsed = parseNameLF(body);
+        firstLast = { first: parsed.first, last: parsed.last };
+      } else {
+        firstLast = splitFirstLast(body);
+      }
+      if (!firstLast) return send('Please enter the patient name as "First Last".');
+      s.firstName = firstLast.first;
+      s.lastName  = firstLast.last;
+      s.patientName = `${s.firstName} ${s.lastName}`;
+      s.state = 'intake_symptoms';
+      smsSessions.set(from, s);
+      return send(nextIntakePrompt(s));
+    }
+
+    if (s.state === 'intake_symptoms') {
+      if (body.length < 2) return send('Give me a short phrase (e.g., "ear pain", "sprained ankle").');
+      s.symptoms = body;
+      s.specialty = inferSpecialty(body);
+      s.state = 'intake_zip';
+      smsSessions.set(from, s);
+      return send(nextIntakePrompt(s));
+    }
+
+    if (s.state === 'intake_zip') {
+      if (!isValidZip(body)) return send('ZIP should be 5 digits (e.g., 30309).');
+      s.zip = body.trim();
+      s.state = 'intake_ins';
+      smsSessions.set(from, s);
+      return send(nextIntakePrompt(s));
+    }
+
+    if (s.state === 'intake_ins') {
+      if (!isValidYN(body)) return send('Reply Y or N for insurance.');
+      s.insuranceY = ynToBool(body);
+      s.state = 'intake_date';
+      smsSessions.set(from, s);
+      return send(nextIntakePrompt(s));
+    }
+
+    if (s.state === 'intake_date') {
+      if (!isValidDate(body)) return send('Use MM/DD/YYYY (e.g., 10/07/2025).');
+      s.dateStr = body.trim();
+      s.state = 'intake_time';
+      smsSessions.set(from, s);
+      return send(nextIntakePrompt(s));
+    }
+
+    if (s.state === 'intake_time') {
+      if (!isValidTime(body)) return send('Use a time like 10:30 AM.');
+      s.timeStr = body.trim();
+      s.windowText = `${s.dateStr} ${s.timeStr}`;
+      s.state = 'confirm_intake';
+      smsSessions.set(from, s);
+      return send(nextIntakePrompt(s));
+    }
+
+    if (s.state === 'confirm_intake') {
+      if (!/^yes\b/i.test(body)) return send('Please reply YES to continue, or BACK to edit.');
+      const mine = getPreferredClinics(from);
+      s.state = mine.length ? 'choose_source' : 'select_clinic';
+      smsSessions.set(from, s);
+
+      if (mine.length) {
+        s.preferredList = mine;
+        smsSessions.set(from, s);
+        const listStr = mine.slice(0,3).map((c,i)=>`${i+1}) ${c.name}${c.address? ' — '+c.address : ''}`).join('\n');
+        return send(
+          `Great. Would you like me to try your usual clinic first?\n` +
+          `${listStr}${mine.length>3?`\n…and ${mine.length-3} more.`:''}\n\n` +
+          `Reply MINE to use #1, MINE 2 (or 3) to pick another, or NEARBY to search clinics near ${s.zip}.`
+        );
+      }
+
+      // no saved clinics → search nearby
+      const clinics = await findClinics(s.zip, s.specialty);
+      s.clinics = clinics;
+      const top = clinics[0];
+      if (!top) {
+        s.state = 'intake_zip';
+        smsSessions.set(from, s);
+        return send(`I couldn’t find clinics near ${s.zip}. Please re-enter ZIP or reply CANCEL.`);
+      }
+      s.chosenClinic = { name: top.name, phone: top.phone, address: top.address };
+      smsSessions.set(from, s);
+
       return send(
-        `I couldn’t read that. Please copy this template and fill it in:\n\n` +
-        `Name: Last, First\nSymptoms: <brief>\nZIP: 12345\nInsurance: Y/N\nPreferred: MM/DD/YYYY, HH:MM AM/PM`
+        `Found: ${top.name}${top.address ? ' — ' + top.address : ''}\n` +
+        `Book for ${s.windowText}? Reply YES to call, or NEXT for another option.`
       );
     }
-    const specialty = inferSpecialty(parsed.symptoms);
-    s = {
-      state: 'choose_source', // choose preferred vs nearby
-      patientName: parsed.patientName,
-      firstName: parsed.firstName,
-      lastName: parsed.lastName,
-      nameLF: parsed.nameLF,
-      symptoms: parsed.symptoms,
-      zip: parsed.zip,
-      insuranceY: parsed.insuranceY,
-      dateStr: parsed.dateStr,
-      timeStr: parsed.timeStr,
-      windowText: parsed.windowText,
-      specialty
-    };
-    smsSessions.set(from, s);
-
-    const mine = getPreferredClinics(from);
-    if (mine.length) {
-      s.preferredList = mine;
-      s.chosenClinic = null;
-      smsSessions.set(from, s);
-      const listStr = mine.slice(0,3).map((c,i)=>`${i+1}) ${c.name}${c.address? ' — '+c.address : ''}`).join('\n');
-      return send(
-        `Would you like me to try your usual clinic first?\n` +
-        `${listStr}${mine.length>3?`\n…and ${mine.length-3} more.`:''}\n\n` +
-        `Reply MINE to use #1, MINE 2 (or 3) to pick another, or NEARBY to search clinics near ${s.zip}.`
-      );
-    }
-
-    // no saved clinics → search nearby
-    const clinics = await findClinics(s.zip, s.specialty);
-    s.clinics = clinics;
-    const top = clinics[0];
-    if (!top) {
-      s.state = 'await_bulk';
-      smsSessions.set(from, s);
-      return send(`I couldn’t find clinics nearby. Reply RESET to try again with a different ZIP or symptoms.`);
-    }
-    s.state = 'select_clinic';
-    s.chosenClinic = { name: top.name, phone: top.phone, address: top.address };
-    smsSessions.set(from, s);
-
-    return send(
-      `Found: ${top.name}${top.address ? ' — ' + top.address : ''}\n` +
-      `Book for ${s.windowText}? Reply YES to call, or NEXT for another option.\n` +
-      `Tip: Save your own clinic with "MY CLINIC: Name | +1XXXXXXXXXX".`
-    );
   }
 
   // Choose preferred vs nearby
-  if (s.state === 'choose_source') {
-    // MINE [index]
+  if (s?.state === 'choose_source') {
     const mMine = body.match(/^mine\s*(\d+)?$/i);
     if (mMine) {
       const idx = Math.max(1, parseInt(mMine[1]||'1',10)) - 1;
@@ -727,15 +770,14 @@ app.post('/sms', async (req, res) => {
       }
     }
 
-    // NEARBY
     if (/^nearby$/i.test(body)) {
       const clinics = await findClinics(s.zip, s.specialty);
       s.clinics = clinics;
       const top = clinics[0];
       if (!top) {
-        s.state = 'await_bulk';
+        s.state = 'intake_zip';
         smsSessions.set(from, s);
-        return send(`I couldn’t find clinics nearby. Reply RESET to try again with a different ZIP or symptoms.`);
+        return send(`I couldn’t find clinics nearby. Re-enter ZIP or reply CANCEL.`);
       }
       s.state = 'select_clinic';
       s.chosenClinic = { name: top.name, phone: top.phone, address: top.address };
@@ -750,7 +792,7 @@ app.post('/sms', async (req, res) => {
   }
 
   // Selecting/confirming clinic (NEARBY flow)
-  if (s.state === 'select_clinic') {
+  if (s?.state === 'select_clinic') {
     if (/^yes\b/i.test(body)) {
       if (!s?.chosenClinic?.phone) {
         return send(`This clinic didn’t list a phone. Reply NEXT for another option or RESET to start over.`);
@@ -783,8 +825,7 @@ app.post('/sms', async (req, res) => {
     return send(`Reply YES to call this clinic, or NEXT for another option.`);
   }
 
-  // If we reach here while calling/in-between
-  if (s.state === 'calling') {
+  if (s?.state === 'calling') {
     return send(`I’m on it. I’ll text you once I confirm the time. You can also reply RETRY / WAIT 5 / WAIT 15 / CANCEL.`);
   }
 
