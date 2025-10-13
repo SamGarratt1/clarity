@@ -18,7 +18,7 @@ const {
   PORT = 3000,
   BRAND_NAME = 'Clarity Health Concierge',
   BRAND_SLOGAN = 'AI appointment assistant',
-  TTS_VOICE = 'Polly.Joanna-Neural'
+  TTS_VOICE = 'Matthew.Joanna-Neural'
 } = process.env;
 
 // ---------- Clients ----------
