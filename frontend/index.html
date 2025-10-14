@@ -1,43 +1,99 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Clarity Health Concierge</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clarity Health Concierge — AI Appointment Assistant</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header>
-    <h1>Clarity Health Concierge</h1>
-    <p>Your AI-powered medical appointment assistant</p>
+  <header class="nav">
+    <div class="container nav__inner">
+      <div class="brand">
+        <div class="brand__logo">◎</div>
+        <div class="brand__name">Clarity Health Concierge</div>
+      </div>
+      <nav class="nav__links">
+        <a href="#how">How it works</a>
+        <a href="#sms-optin">SMS Program</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+      </nav>
+    </div>
   </header>
 
   <main>
-    <section id="intro">
-      <p>
-        Clarity Health Concierge helps patients schedule and confirm medical appointments through secure, automated text messaging.
-        We contact your clinic on your behalf — no app downloads or wait times required.
-      </p>
-      <p><strong>Text <span style="color:#007BFF;">NEW</span> to <a href="tel:+18337224939">+1 (833) 722-4939</a></strong> to get started.</p>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container hero__inner">
+        <div class="hero__copy">
+          <h1>Your AI-powered medical appointment assistant</h1>
+          <p class="lead">
+            Clarity Health Concierge helps patients schedule and confirm medical appointments through secure, automated text messaging.
+            We contact your clinic on your behalf — no app downloads or wait times required.
+          </p>
+          <p class="cta">
+            <a class="btn btn--primary" href="sms:+18337224939">Text NEW to (833) 722-4939</a>
+            <span class="cta__alt">Prefer to call? <a href="tel:+18337224939">(833) 722-4939</a></span>
+          </p>
+          <ul class="badges">
+            <li>Transactional only</li>
+            <li>Twilio powered</li>
+            <li>Human-verified bookings</li>
+          </ul>
+        </div>
+        <div class="hero__card">
+          <div class="card">
+            <h3>What you’ll text</h3>
+            <ol>
+              <li>Name (First Last)</li>
+              <li>Symptoms (brief)</li>
+              <li>ZIP</li>
+              <li>Insurance (Y/N)</li>
+              <li>Preferred date & time</li>
+            </ol>
+            <p class="muted">We handle the rest and confirm by text.</p>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <section id="sms-optin" style="background-color:#f8f9fa; padding:1.5rem; border-radius:8px; margin-top:2rem;">
-      <h2>SMS Consent Disclosure</h2>
-      <p>
-        By texting <strong>NEW</strong> to <a href="tel:+18337224939">+1 (833) 722-4939</a>,
-        you consent to receive <strong>transactional messages</strong> from Clarity Health Concierge
-        regarding appointment scheduling, confirmations, and reminders.
-      </p>
-      <p>
-        No marketing messages will be sent. Message & data rates may apply. 
-        Message frequency varies. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for help.
-      </p>
-      <p>See our <a href="/privacy.html">Privacy Policy</a> and <a href="/terms.html">Terms of Service</a>.</p>
+    <!-- How it works -->
+    <section id="how" class="section section--alt">
+      <div class="container steps">
+        <div class="step"><div class="step__num">1</div><h4>Text NEW</h4><p>Answer a few quick questions.</p></div>
+        <div class="step"><div class="step__num">2</div><h4>We call the clinic</h4><p>We secure the earliest slot.</p></div>
+        <div class="step"><div class="step__num">3</div><h4>Get confirmation</h4><p>Time and “what to bring.”</p></div>
+      </div>
+    </section>
+
+    <!-- SMS Consent (keep your exact wording) -->
+    <section id="sms-optin" class="section consent">
+      <div class="container narrow">
+        <h2>SMS Consent Disclosure</h2>
+        <!-- keep your existing paragraphs exactly as they are here -->
+        <p>By texting <strong>NEW</strong> to <a href="sms:+18337224939">+1 (833) 722-4939</a>, you consent to receive <strong>transactional messages</strong> from Clarity Health Concierge regarding appointment scheduling, confirmations, and reminders.</p>
+        <p>No marketing messages will be sent. Message &amp; data rates may apply. Message frequency varies. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for help.</p>
+        <p>See our <a href="privacy.html">Privacy Policy</a> and <a href="terms.html">Terms of Service</a>.</p>
+      </div>
     </section>
   </main>
 
-  <footer>
-    <p>© 2025 Clarity Health Concierge. All rights reserved.</p>
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div class="brand brand--footer">
+        <div class="brand__logo">◎</div>
+        <div class="brand__name">Clarity Health Concierge</div>
+      </div>
+      <div class="footer__links">
+        <a href="terms.html">Terms</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="tel:+18337224939">(833) 722-4939</a>
+      </div>
+    </div>
+    <div class="container">
+      <p class="copyright">© 2025 Clarity Health Concierge. All rights reserved.</p>
+    </div>
   </footer>
 </body>
 </html>
