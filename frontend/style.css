@@ -1,53 +1,79 @@
-body {
-  font-family: 'Helvetica Neue', Arial, sans-serif;
-  background: #f9fafc;
-  color: #222;
-  line-height: 1.6;
-  margin: 0;
-  padding: 0;
+:root{
+  --brand:#0B66FF;
+  --ink:#0f172a;
+  --muted:#6b7280;
+  --bg:#ffffff;
+  --alt:#f6f7fb;
+  --card:#ffffff;
+  --border:#e5e7eb;
+  --shadow:0 10px 30px rgba(2,6,23,.08);
 }
 
-header {
-  background: #0078ff;
-  color: white;
-  text-align: center;
-  padding: 2em 1em;
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;
+  color:var(--ink); background:var(--bg);
 }
 
-main {
-  max-width: 800px;
-  margin: 2em auto;
-  padding: 0 1em;
-}
+/* Layout helpers */
+.container{max-width:1100px;margin:0 auto;padding:0 20px}
+.narrow{max-width:760px;margin:0 auto}
+.section{padding:56px 0}
+.section.alt{background:var(--alt)}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+@media (max-width:900px){.grid-3{grid-template-columns:1fr}}
 
-h1, h2 {
-  margin-bottom: 0.5em;
-}
+.muted{color:var(--muted)}
+.tel{color:var(--brand);text-decoration:none}
+.tel:hover{text-decoration:underline}
 
-.hero {
-  text-align: center;
-  padding: 2em 0;
-}
+/* Nav */
+.nav{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid var(--border)}
+.nav-inner{display:flex;align-items:center;justify-content:space-between;height:64px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700}
+.brand-text{letter-spacing:.2px}
+.logo{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff;font-weight:800}
+.nav-links a{margin-left:18px;color:#334155;text-decoration:none}
+.nav-links a:hover{color:var(--brand)}
+.link-muted{opacity:.85}
 
-.cta {
-  font-size: 1.2em;
-  font-weight: bold;
-  margin-top: 1em;
-}
+/* Hero */
+.hero{padding:72px 0 32px}
+.hero-inner{display:grid;grid-template-columns:1.25fr .75fr;gap:28px;align-items:center}
+@media (max-width:900px){.hero-inner{grid-template-columns:1fr}}
+.hero-copy h1{font-size:40px;line-height:1.15;margin:0 0 10px}
+.lead{font-size:18px;color:#374151;margin:0 0 18px}
+.cta-stack{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin:18px 0}
+.btn{display:inline-block;border-radius:10px;padding:12px 18px;font-weight:600;text-decoration:none;border:1px solid transparent;transition:.2s}
+.btn-primary{background:var(--brand);color:#fff;box-shadow:var(--shadow)}
+.btn-primary:hover{transform:translateY(-1px)}
+.alt-cta{font-size:14px;color:#475569}
+.trustbar{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;color:#64748b;font-size:14px}
 
-.legal {
-  font-size: 0.8em;
-  color: #666;
-}
+.hero-card .card{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:18px}
+.hero-card h3{margin:0 0 8px;font-size:18px}
+.hero-card ol{margin:0 0 8px 18px}
+.hero-card .muted{font-size:14px}
 
-footer {
-  background: #eee;
-  text-align: center;
-  padding: 1em;
-  margin-top: 2em;
-}
+/* Features */
+.feature{background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:18px}
+.feature h3{margin:0 0 6px}
 
-footer a {
-  color: #0078ff;
-  text-decoration: none;
-}
+/* Steps */
+.steps .step{background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:18px}
+.steps .num{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff;font-weight:700;margin-bottom:6px}
+
+/* Consent */
+.consent{background:var(--alt);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.consent h2{margin:0 0 8px}
+.consent a{color:var(--brand);text-decoration:none}
+.consent a:hover{text-decoration:underline}
+
+/* Footer */
+.footer{background:#0b1220;color:#aab1c3;padding:28px 0 18px;margin-top:12px}
+.footer-inner{display:flex;justify-content:space-between;align-items:center;gap:16px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.08)}
+.brand--footer .logo{background:#fff;color:#0b1220}
+.footer a{color:#cbd5e1;text-decoration:none;margin-left:16px}
+.footer a:hover{text-decoration:underline}
+.footer .copyright{font-size:13px;color:#94a3b8;margin:12px 0 0;text-align:center}
