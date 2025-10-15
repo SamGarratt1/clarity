@@ -1,10 +1,17 @@
 <!doctype html>
 <html lang="en">
 <head>
+  
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Clarity Health Concierge — AI Appointment Assistant</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Simple SVG favicon -->
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+
 </head>
 <body>
   <header class="nav">
@@ -25,38 +32,32 @@
   <main>
     <!-- Hero -->
     <section class="hero">
-      <div class="container hero__inner">
-        <div class="hero__copy">
-          <h1>Your AI-powered medical appointment assistant</h1>
-          <p class="lead">
-            Clarity Health Concierge helps patients schedule and confirm medical appointments through secure, automated text messaging.
-            We contact your clinic on your behalf — no app downloads or wait times required.
-          </p>
-          <p class="cta">
-            <a class="btn btn--primary" href="sms:+18337224939">Text NEW to (833) 722-4939</a>
-            <span class="cta__alt">Prefer to call? <a href="tel:+18337224939">(833) 722-4939</a></span>
-          </p>
-          <ul class="badges">
-            <li>Transactional only</li>
-            <li>Twilio powered</li>
-            <li>Human-verified bookings</li>
-          </ul>
-        </div>
-        <div class="hero__card">
-          <div class="card">
-            <h3>What you’ll text</h3>
-            <ol>
-              <li>Name (First Last)</li>
-              <li>Symptoms (brief)</li>
-              <li>ZIP</li>
-              <li>Insurance (Y/N)</li>
-              <li>Preferred date & time</li>
-            </ol>
-            <p class="muted">We handle the rest and confirm by text.</p>
-          </div>
-        </div>
-      </div>
-    </section>
+  <div class="container hero__inner">
+    <div class="hero__copy">
+      <h1>Your AI-powered medical appointment assistant</h1>
+      <p class="lead">
+        Clarity Health Concierge helps patients schedule and confirm appointments through secure, automated text messaging. 
+        We contact your clinic on your behalf — no app downloads or long hold times.
+      </p>
+      <p class="cta">
+        <a class="btn btn--primary" href="sms:+18337224939">Text NEW to (833) 722-4939</a>
+        <span class="cta__alt">Prefer to call? <a href="tel:+18337224939">(833) 722-4939</a></span>
+      </p>
+      <ul class="badges">
+        <li>Transactional only</li>
+        <li>Twilio powered</li>
+        <li>Human-verified bookings</li>
+      </ul>
+    </div>
+
+    <div class="hero__photo">
+      <img src="https://images.pexels.com/photos/8867435/pexels-photo-8867435.jpeg?auto=compress&cs=tinysrgb&w=1600"
+           alt="AI concierge assisting with medical appointment scheduling">
+    </div>
+  </div>
+</section>
+
+
 
     <!-- How it works -->
     <section id="how" class="section section--alt">
