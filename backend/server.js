@@ -174,7 +174,7 @@ async function handleText(from, rawBody) {
     s.timeStr = body; s.state = 'confirm_intake'; smsSessions.set(from, s);
     return nextIntakePrompt(s);
   }
-  if (s.state === 'confirm_intake')) {
+  if (s.state === 'confirm_intake') {
     if (!/^yes\b/i.test(body)) return 'Please reply YES to continue.';
     const clinics = await findClinics(s.zip, s.specialty);
     const top = clinics[0];
