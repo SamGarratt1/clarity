@@ -1,838 +1,242 @@
-import 'dotenv/config';
-import express from 'express';
-import bodyParser from 'body-parser';
-import { v4 as uuidv4 } from 'uuid';
-import twilioPkg from 'twilio';
-import OpenAI from 'openai';
-import * as chrono from 'chrono-node';
-import { Client as GoogleMapsClient } from '@googlemaps/google-maps-services-js';
+// --- Imports and setup ---
+import express from "express";
+import dotenv from "dotenv";
+import bodyParser from "body-parser";
+import twilioPkg from "twilio";
+import fetch from "node-fetch";
 
-// ---------- ENV ----------
-const {
-  TWILIO_ACCOUNT_SID,
-  TWILIO_AUTH_TOKEN,
-  TWILIO_CALLER_ID,
-  PUBLIC_BASE_URL,
-  OPENAI_API_KEY,
-  GOOGLE_MAPS_API_KEY,
-  PORT = 3000,
-  BRAND_NAME = 'Clarity Health Concierge',
-  BRAND_SLOGAN = 'AI appointment assistant',
-  TTS_VOICE = 'Matthew.Joanna-Neural'
-} = process.env;
+dotenv.config();
 
-// ---------- Clients ----------
-const client = twilioPkg(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-const mapsClient = new GoogleMapsClient({});
-
-// ---------- App ----------
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// small root + health
-app.get('/', (_req, res) => res.type('text/plain').send('Clarity backend alive'));
-app.get('/healthz', (_req, res) => {
-  const checks = {
-    env: true,
-    twilio: !!TWILIO_ACCOUNT_SID,
-    maps: !!GOOGLE_MAPS_API_KEY,
-    openai: !!OPENAI_API_KEY
-  };
-  const ok = Object.values(checks).every(Boolean);
-  res.status(ok ? 200 : 500).json({ ok, checks });
-});
+// --- Config ---
+const PORT = process.env.PORT || 3000;
+const BRAND_NAME = "Clarity Health Concierge";
+const BRAND_SLOGAN = "AI-powered appointment scheduling";
+const twilioClient = twilioPkg(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-// ---------- Helpers ----------
-function speak(twiml, text) {
-  twiml.say({ voice: TTS_VOICE }, text);
-}
-
-const MAX_CALL_MS   = 3 * 60 * 1000;  // 3 min
-const MAX_HOLD_MS   = 90 * 1000;      // 90s on hold
-const DEFAULT_RETRY_MS = 15 * 60 * 1000; // 15 min
-const SHORT_WAIT_MS    = 5  * 60 * 1000; // 5 min
-
-// memory stores
-const sessions            = new Map(); // voice sessions (key: CallSid)
-const smsSessions         = new Map(); // sms state per patient (key: From)
-const lastCallByPatient   = new Map(); // last call details per patient (key: From)
-const pendingRetries      = new Map(); // scheduled retry timers (key: From)
-
-// preferred clinics per patient (key = patient phone)
+// --- In-memory stores ---
+const smsSessions = new Map();
+const lastCallByPatient = new Map();
 const preferredClinicsByPatient = new Map();
-function getPreferredClinics(patientPhone) {
-  return preferredClinicsByPatient.get(patientPhone) || [];
-}
-function savePreferredClinic(patientPhone, clinic) {
-  const list = preferredClinicsByPatient.get(patientPhone) || [];
-  const exists = list.find(c =>
-    (clinic.phone && c.phone && c.phone.trim() === (clinic.phone || '').trim()) ||
-    (clinic.name && c.name && c.name.toLowerCase() === clinic.name.toLowerCase())
-  );
-  if (!exists) {
-    list.push({
-      name: (clinic.name || 'My Clinic').trim(),
-      phone: (clinic.phone || '').trim(),
-      address: (clinic.address || '').trim(),
-      notes: (clinic.notes || '').trim()
-    });
-  }
-  preferredClinicsByPatient.set(patientPhone, list);
-  return list;
-}
 
-// ---------- Validation ----------
-const nameLFRe = /^\s*([A-Za-z'.\- ]+)\s*,\s*([A-Za-z'.\- ]+)\s*$/; // "Last, First"
-const zipRe    = /^\d{5}$/;
-const ynRe     = /^(y|yes|n|no)$/i;
-const timeRe   = /^\s*(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)\s*$/i;
-const dateRe   = /^\s*(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])\/(20\d{2})\s*$/;
-
-const isValidNameLF = s => nameLFRe.test(s||'');
-const parseNameLF = s => {
-  const m = (s||'').match(nameLFRe); if(!m) return null;
-  const last = m[1].trim(), first = m[2].trim();
-  return { last, first, full: `${first} ${last}` };
+// --- Helper functions ---
+const savePreferredClinic = (from, clinic) => {
+  if (!preferredClinicsByPatient.has(from)) preferredClinicsByPatient.set(from, []);
+  preferredClinicsByPatient.get(from).push(clinic);
 };
-const isValidZip  = s => zipRe.test((s||'').trim());
-const isValidYN   = s => ynRe.test((s||'').trim());
-const ynToBool    = s => /^y/i.test(s||'');
-const isValidTime = s => timeRe.test((s||'').trim());
-const isValidDate = s => dateRe.test((s||'').trim());
+const getPreferredClinics = (from) => preferredClinicsByPatient.get(from) || [];
 
-// ---------- Conversational intake helpers ----------
-function splitFirstLast(full = '') {
-  const parts = full.trim().replace(/\s+/g,' ').split(' ');
-  if (parts.length < 2) return null;
-  const first = parts.shift();
-  const last  = parts.join(' ');
+const isValidNameLF = (s) => /,/.test(s);
+const parseNameLF = (s) => {
+  const [last, first] = s.split(",").map((x) => x.trim());
   return { first, last };
-}
+};
+const splitFirstLast = (s) => {
+  const parts = s.split(/\s+/);
+  if (parts.length < 2) return null;
+  return { first: parts[0], last: parts.slice(1).join(" ") };
+};
+const isValidZip = (s) => /^\d{5}$/.test(s);
+const isValidYN = (s) => /^[YNyn]$/.test(s);
+const ynToBool = (s) => /^[Yy]/.test(s);
+const isValidDate = (s) => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s);
+const isValidTime = (s) => /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(s);
 
-function nextIntakePrompt(stateObj) {
-  switch (stateObj.state) {
-    case 'intake_name':       return 'What is the patient name? (First Last)';
-    case 'intake_symptoms':   return 'Briefly describe symptoms (e.g., sore throat, fever).';
-    case 'intake_zip':        return 'What is your 5-digit ZIP code?';
-    case 'intake_ins':        return 'Do you have insurance? Reply Y or N.';
-    case 'intake_date':       return 'Preferred date? (MM/DD/YYYY)';
-    case 'intake_time':       return 'Preferred time? (e.g., 10:30 AM)';
-    case 'confirm_intake': {
-      const s = stateObj;
-      const summary =
-        `Please confirm:\n` +
-        `Name: ${s.firstName} ${s.lastName}\n` +
-        `Symptoms: ${s.symptoms}\n` +
-        `ZIP: ${s.zip}\n` +
-        `Insurance: ${s.insuranceY ? 'Y' : 'N'}\n` +
-        `Preferred: ${s.dateStr}, ${s.timeStr}\n` +
-        `Reply YES to continue, or BACK to edit.`;
-      return summary;
-    }
-    default: return 'Say NEW to start.';
+const inferSpecialty = (symptom) => {
+  const lower = symptom.toLowerCase();
+  if (lower.includes("eye")) return "optometrist";
+  if (lower.includes("skin")) return "dermatologist";
+  if (lower.includes("ear") || lower.includes("throat")) return "ENT";
+  return "primary care";
+};
+
+const nextIntakePrompt = (s) => {
+  switch (s.state) {
+    case "intake_name": return "What is the patient's full name?";
+    case "intake_symptoms": return "What’s the reason for the visit?";
+    case "intake_zip": return "What ZIP code should I search near?";
+    case "intake_ins": return "Do you have insurance? (Y/N)";
+    case "intake_date": return "What date works best? (MM/DD/YYYY)";
+    case "intake_time": return "Preferred time? (e.g., 10:30 AM)";
+    case "confirm_intake": return `Confirm booking for ${s.patientName} about "${s.symptoms}" near ${s.zip} on ${s.dateStr} at ${s.timeStr}? Reply YES to continue.`;
+    default: return "Reply NEW to start over.";
   }
+};
+
+// --- Twilio voice helper ---
+const speak = (g, text) => g.say({ voice: "Polly.Amy" }, text);
+
+// --- Find clinics mock (replace with real API later) ---
+async function findClinics(zip, specialty) {
+  return [
+    { name: `${specialty} Clinic of ${zip}`, phone: process.env.TEST_CLINIC_PHONE, address: "123 Main St" },
+  ];
 }
 
-// ---------- Maps ----------
-function inferSpecialty(symptoms = '') {
-  const s = (symptoms || '').toLowerCase();
-  if (/skin|rash|acne|mole|dermat/i.test(s)) return 'dermatologist';
-  if (/tooth|gum|dent/i.test(s)) return 'dentist';
-  if (/eye|vision|ophthalm/i.test(s)) return 'ophthalmologist';
-  if (/throat|ear|nose|sinus|ent/i.test(s)) return 'otolaryngologist';
-  if (/chest pain|shortness|palpit/i.test(s)) return 'cardiologist';
-  if (/stomach|abdomen|nausea|gi/i.test(s)) return 'gastroenterologist';
-  if (/bone|joint|fracture|ortho/i.test(s)) return 'orthopedic';
-  if (/flu|fever|cough|urgent|injury|stitches/i.test(s)) return 'urgent care';
-  return 'clinic';
+// --- Start a clinic call ---
+async function startClinicCall(details) {
+  if (!details.to) throw new Error('Missing clinic number');
+  console.log(`Calling clinic ${details.clinicName} (${details.to}) for ${details.name}`);
+  lastCallByPatient.set(details.callback, details);
+
+  const call = await twilioClient.calls.create({
+    twiml: `<Response><Say>Calling ${details.clinicName} for ${details.name} about ${details.reason}</Say></Response>`,
+    to: details.to,
+    from: process.env.TWILIO_PHONE_NUMBER,
+  });
+  return call.sid;
 }
 
-async function findClinics(zip, specialty = 'clinic') {
-  try {
-    const geoResp = await mapsClient.geocode({
-      params: { address: zip, key: GOOGLE_MAPS_API_KEY }
-    });
-    if (!geoResp.data.results.length) return [];
-    const { lat, lng } = geoResp.data.results[0].geometry.location;
-
-    const placesResp = await mapsClient.placesNearby({
-      params: {
-        location: { lat, lng },
-        radius: 8000,
-        keyword: specialty,
-        type: 'doctor',
-        key: GOOGLE_MAPS_API_KEY
-      }
-    });
-
-    return placesResp.data.results.slice(0, 8).map(p => ({
-      name: p.name,
-      address: p.vicinity || p.formatted_address || '',
-      rating: p.rating || null,
-      location: p.geometry?.location,
-      phone: null // (MVP) fetch via Place Details later
-    }));
-  } catch (e) {
-    console.error('Maps API error:', e.message);
-    return [];
-  }
-}
-
-// ---------- GPT ----------
+// --- AI call prompt builder ---
 function buildSystemPrompt(userReq) {
-  const nameText = userReq.name || 'John Doe';
+  const nameText = userReq.name || "John Doe";
   return `
 You are a polite, concise patient concierge calling a clinic to book an appointment.
 Goal: secure the earliest suitable slot that matches the patient’s preferences.
-Rules:
-- Do NOT diagnose or offer medical advice.
-- Be friendly, clear, and efficient; use concise, professional phrasing.
+
+Handling rules:
+- If staff says "anytime", "come anytime", "we are free all day", or "walk-in":
+  • Prefer a specific time slot. Politely ask: "Could we put ${nameText} on the schedule at your earliest specific time today, or tomorrow morning?"
+  • If they only accept walk-ins, confirm "Walk-in (any time during business hours)" and proceed.
 - Always confirm: patient name, reason, callback, insurance if pressed.
-- Confirm: "Great, please confirm: [date/time], provider if available, any prep."
+- Confirm: "Great, please confirm: [date/time or Walk-in], provider if available, any prep."
 - Before ending, ask: "Is there anything that ${nameText} needs to bring?"
 - Then thank and end call.
 
 Patient:
 Name: ${nameText}
-Reason: ${userReq.reason || 'Check-up'}
-Preferred: ${JSON.stringify(userReq.preferredTimes || ['This week'])}
-Callback: ${userReq.callback || 'N/A'}
+Reason: ${userReq.reason || "Check-up"}
+Preferred: ${JSON.stringify(userReq.preferredTimes || ["This week"])}
+Callback: ${userReq.callback || "N/A"}
 `.trim();
 }
 
-async function nextAIUtterance(callSid) {
-  const session = sessions.get(callSid);
-  const lastTurns = (session?.transcript || []).slice(-3);
-  const messages = [
-    { role: 'system', content: buildSystemPrompt(session.userRequest) },
-    ...lastTurns.map(t => ({ role: t.from === 'ai' ? 'assistant' : 'user', content: t.text }))
-  ];
-  const resp = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    temperature: 0.3,
-    messages
-  });
-  return (resp.choices?.[0]?.message?.content || '').trim();
-}
-
-// ---------- Call helpers / retry ----------
-async function startClinicCall({ to, name, reason, preferredTimes, clinicName, callback }) {
-  const call = await client.calls.create({
-    to,
-    from: TWILIO_CALLER_ID,
-    url: `${PUBLIC_BASE_URL}/voice?sid=${uuidv4()}`,
-    statusCallback: `${PUBLIC_BASE_URL}/status`,
-    statusCallbackEvent: ['initiated','ringing','answered','completed'],
-    statusCallbackMethod: 'POST'
-  });
-
-  sessions.set(call.sid, {
-    userRequest: { name, reason, preferredTimes, clinicName, callback, clinicPhone: to },
-    transcript: [],
-    status: 'in_progress',
-    confirmed: null,
-    awaitingBring: false,
-    turns: 0,
-    startedAt: Date.now(),
-    onHoldSince: null
-  });
-
-  lastCallByPatient.set(callback, { to, name, reason, preferredTimes, clinicName, callback });
-
-  return call.sid;
-}
-
-function scheduleRetry(patientNumber, details, delayMs) {
-  const existing = pendingRetries.get(patientNumber);
-  if (existing) clearTimeout(existing);
-
-  const timeoutId = setTimeout(async () => {
-    pendingRetries.delete(patientNumber);
-    try {
-      await startClinicCall(details);
-      await client.messages.create({
-        to: details.callback,
-        from: TWILIO_CALLER_ID,
-        body: `Retrying your booking with ${details.clinicName} now. I’ll text the result.`
-      });
-    } catch (e) {
-      console.error('Scheduled retry failed:', e.message);
-      try {
-        await client.messages.create({
-          to: details.callback,
-          from: TWILIO_CALLER_ID,
-          body: `Couldn’t retry the call just now. Reply RETRY to try again.`
-        });
-      } catch {}
-    }
-  }, delayMs);
-
-  pendingRetries.set(patientNumber, timeoutId);
-}
-
-function cancelRetry(patientNumber) {
-  const t = pendingRetries.get(patientNumber);
-  if (t) {
-    clearTimeout(t);
-    pendingRetries.delete(patientNumber);
-    return true;
-  }
-  return false;
-}
-
-// ---------- Routes ----------
-
-// Register/append a preferred clinic (for app/website onboarding)
-app.post('/profile/clinic', (req, res) => {
-  try {
-    const { patientPhone, name, phone, address = '', notes = '' } = req.body || {};
-    if (!patientPhone || !name || !phone) {
-      return res.status(400).json({ ok:false, error:'patientPhone, name, phone required' });
-    }
-    const out = savePreferredClinic(patientPhone, { name, phone, address, notes });
-    return res.json({ ok:true, clinics: out });
-  } catch (e) {
-    return res.status(500).json({ ok:false, error: e.message });
-  }
-});
-
-// Start call (manual/programmatic)
-app.post('/call', async (req, res) => {
-  console.log('POST /call body:', req.body);
-  const userRequest = {
-    name: req.body.name,
-    reason: req.body.reason,
-    preferredTimes: Array.isArray(req.body.preferredTimes)
-      ? req.body.preferredTimes
-      : (typeof req.body.preferredTimes === 'string'
-          ? (() => { try { return JSON.parse(req.body.preferredTimes); } catch { return [req.body.preferredTimes]; } })()
-          : []),
-    clinicName: req.body.clinicName || '',
-    callback: req.body.callback || '',
-    clinicPhone: req.body.clinicPhone || req.body.to
-  };
-
-  try {
-    if (!userRequest.clinicPhone) { throw new Error("Required parameter \"params['to']\" missing."); }
-    const callSid = await startClinicCall({
-      to: userRequest.clinicPhone,
-      name: userRequest.name,
-      reason: userRequest.reason,
-      preferredTimes: userRequest.preferredTimes,
-      clinicName: userRequest.clinicName,
-      callback: userRequest.callback
-    });
-    return res.json({ ok: true, callSid });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// First voice response
-app.post('/voice', async (req, res) => {
-  const callSid = req.body.CallSid;
-  const twiml = new twilioPkg.twiml.VoiceResponse();
-  const session = sessions.get(callSid);
-
-  if (!session) {
-    speak(twiml, 'I lost the call context. Goodbye.');
-    twiml.hangup();
-    return res.type('text/xml').send(twiml.toString());
-  }
-
-  const firstLine =
-    `Hello, this is ${BRAND_NAME} — ${BRAND_SLOGAN}. ` +
-    `I’m calling to book an appointment for ${session.userRequest.name}. ` +
-    `${session.userRequest.reason ? 'Reason: ' + session.userRequest.reason + '. ' : ''}` +
-    `Do you have availability ${session.userRequest.preferredTimes?.[0] || 'this week'}?`;
-
-  session.transcript.push({ from: 'ai', text: firstLine });
-  speak(twiml, firstLine);
-
-  const gather = twiml.gather({
-    input: 'speech',
-    action: '/gather',
-    method: 'POST',
-    speechTimeout: 'auto'
-  });
-  speak(gather, 'I can wait for your available times.');
-
-  res.type('text/xml').send(twiml.toString());
-});
-
-// Handle receptionist speech
-app.post('/gather', async (req, res) => {
-  const callSid = req.body.CallSid;
-  const speech = (req.body.SpeechResult || '').trim();
-  const twiml = new twilioPkg.twiml.VoiceResponse();
-  const session = sessions.get(callSid);
-
-  if (!session) {
-    speak(twiml, 'I lost the call context. Goodbye.');
-    twiml.hangup();
-    return res.type('text/xml').send(twiml.toString());
-  }
-
-  const elapsedMs = Date.now() - (session.startedAt || Date.now());
-  if (elapsedMs > MAX_CALL_MS) {
-    speak(twiml, "I have to wrap here. We'll follow up by text. Thank you.");
-    twiml.hangup();
-    try {
-      await client.messages.create({
-        to: session.userRequest.callback,
-        from: TWILIO_CALLER_ID,
-        body: `Clinic line busy/long. Reply RETRY for another attempt, WAIT 5 / WAIT 15 to schedule, or CANCEL.`
-      });
-    } catch {}
-    return res.type('text/xml').send(twiml.toString());
-  }
-
-  if (speech) session.transcript.push({ from: 'rx', text: speech });
-  const lower = speech.toLowerCase();
-
-  // hold detection
-  if (/\b(please hold|hold on|one moment|just a moment|put you on hold|one sec|minute)\b/i.test(lower)) {
-    if (!session.onHoldSince) session.onHoldSince = Date.now();
-    if (Date.now() - session.onHoldSince > MAX_HOLD_MS) {
-      speak(twiml, "I’ll follow up later. Thank you.");
-      twiml.hangup();
-      try {
-        const details = {
-          to: session.userRequest.clinicPhone,
-          name: session.userRequest.name,
-          reason: session.userRequest.reason,
-          preferredTimes: session.userRequest.preferredTimes,
-          clinicName: session.userRequest.clinicName,
-          callback: session.userRequest.callback
-        };
-        await client.messages.create({
-          to: session.userRequest.callback,
-          from: TWILIO_CALLER_ID,
-          body: `Clinic kept us on hold too long. Reply NOW/RETRY to call again, or WAIT 5 / WAIT 15 / CANCEL.`
-        });
-        scheduleRetry(session.userRequest.callback, details, DEFAULT_RETRY_MS);
-      } catch {}
-      return res.type('text/xml').send(twiml.toString());
-    }
-    speak(twiml, "Certainly, I can hold.");
-    twiml.pause({ length: 15 });
-    const g = twiml.gather({ input: 'speech', action: '/gather', method: 'POST', speechTimeout: 'auto', timeout: 5 });
-    speak(g, "I’m still here.");
-    return res.type('text/xml').send(twiml.toString());
-  } else if (session.onHoldSince) {
-    session.onHoldSince = null;
-  }
-
-  // after we ask “what to bring”, capture that
-  if (session.awaitingBring) {
-    const bringText = speech || 'No special items';
-    session.confirmed = session.confirmed || {};
-    session.confirmed.bring = bringText;
-    const thanks = `Perfect. Thank you very much. We’ll note it for the patient ${session.userRequest.name}. Have a wonderful day.`;
-    session.status = 'confirmed';
-    session.transcript.push({ from: 'ai', text: thanks });
-    speak(twiml, thanks);
-    twiml.hangup();
-    try {
-      const clinicName = session.userRequest.clinicName || 'the clinic';
-      const when = session.confirmed.time || '(time pending)';
-      const bring = session.confirmed.bring ? `\nBring: ${session.confirmed.bring}` : '';
-      await client.messages.create({
-        to: session.userRequest.callback,
-        from: TWILIO_CALLER_ID,
-        body: `✅ Confirmed: ${when} at ${clinicName}.${bring}\nReply SAVE CLINIC to remember this clinic for next time.`
-      });
-    } catch {}
-    return res.type('text/xml').send(twiml.toString());
-  }
-
-  // intent detection
-  let intent = 'other';
-  if (/\b(yes|yeah|yep|works|okay|ok|sure|that[’']?s fine|perfect|sounds good)\b/i.test(lower)) intent = 'yes';
-  else if (/\b(no|nope|not available|can[’']?t|unavailable)\b/i.test(lower)) intent = 'no';
-  else if (/\b(mon|tue|wed|thu|fri|sat|sun|today|tomorrow|next)\b/i.test(lower)
-        || /\b\d{1,2}(:\d{2})?\s?(am|pm)?\b/i.test(lower)
-        || /\b(morning|afternoon|evening|noon|midday)\b/i.test(lower)) intent = 'time';
-
-  if (intent === 'time') {
-    const parsedDate = chrono.parseDate(speech, new Date());
-    const cleanTime = parsedDate
-      ? parsedDate.toLocaleString('en-US', { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
-      : speech;
-    session.confirmed = { ...(session.confirmed||{}), time: cleanTime };
-    const confirmLine = `Great, I have you down for ${cleanTime} for patient ${session.userRequest.name}. Can you confirm?`;
-    session.transcript.push({ from: 'ai', text: confirmLine });
-    speak(twiml, confirmLine);
-    twiml.gather({ input: 'speech', action: '/gather', method: 'POST', speechTimeout: 'auto', timeout: 6 });
-    return res.type('text/xml').send(twiml.toString());
-  }
-
-  if (intent === 'yes' && session.confirmed?.time) {
-    const askBring = `Thank you. Is there anything that ${session.userRequest.name} needs to bring?`;
-    session.awaitingBring = true;
-    session.transcript.push({ from: 'ai', text: askBring });
-    const g = twiml.gather({ input: 'speech', action: '/gather', method: 'POST', speechTimeout: 'auto', timeout: 7 });
-    speak(g, askBring);
-    return res.type('text/xml').send(twiml.toString());
-  }
-
-  if (intent === 'no') {
-    const retry = 'No problem. Could you share another available time—morning or afternoon works too?';
-    session.transcript.push({ from: 'ai', text: retry });
-    speak(twiml, retry);
-    twiml.gather({ input: 'speech', action: '/gather', method: 'POST', speechTimeout: 'auto', timeout: 6 });
-    return res.type('text/xml').send(twiml.toString());
-  }
-
-  // fallback to GPT or polite repeat
-  let reply;
-  try { reply = await nextAIUtterance(callSid); }
-  catch { reply = "I didn't catch that. Could you share an available day and time?"; }
-
-  session.transcript.push({ from: 'ai', text: reply });
-  speak(twiml, reply);
-  const g = twiml.gather({ input: 'speech', action: '/gather', method: 'POST', speechTimeout: 'auto', timeout: 6 });
-  speak(g, "I'm listening.");
-  return res.type('text/xml').send(twiml.toString());
-});
-
-// Call status → SMS retry prompt
-app.post('/status', async (req, res) => {
-  const callSid = req.body.CallSid;
-  const callStatus = (req.body.CallStatus || '').toLowerCase();
-  const session = sessions.get(callSid);
-  if (!session) return res.sendStatus(200);
-
-  if (callStatus === 'completed' && session.status !== 'confirmed') {
-    try {
-      await client.messages.create({
-        to: session.userRequest.callback,
-        from: TWILIO_CALLER_ID,
-        body: `The clinic ended the call before we could confirm. Reply RETRY to try again, or WAIT 5 / WAIT 15 / CANCEL.`
-      });
-    } catch {}
-  }
-
-  if (/(failed|busy|no-answer|canceled)/i.test(callStatus)) {
-    try {
-      await client.messages.create({
-        to: session.userRequest.callback,
-        from: TWILIO_CALLER_ID,
-        body: `Call didn’t go through (${callStatus}). Reply RETRY to try again, or WAIT 5 / WAIT 15 / CANCEL.`
-      });
-    } catch {}
-  }
-
-  return res.sendStatus(200);
-});
-
-// ---------- SMS webhook ----------
-app.post('/sms', async (req, res) => {
-  const MessagingResponse = twilioPkg.twiml.MessagingResponse;
-  const twiml = new MessagingResponse();
-
-  const from  = (req.body.From || '').trim();
-  const raw   = (req.body.Body || '');
-  const body  = raw.trim();
+// --- handleText (shared logic for SMS + App) ---
+async function handleText(from, rawBody) {
+  const body = (rawBody || "").trim();
   const lower = body.toLowerCase();
+  const send = (t) => t;
 
-  const send = (text) => { twiml.message(text); return res.type('text/xml').send(twiml.toString()); };
-
-  // A2P keywords
-  if (/\b(stop|end|unsubscribe|quit|cancel)\b/.test(lower)) {
-    cancelRetry(from);
-    return send("You’re opted out and won’t receive more texts. Reply START to opt back in.");
-  }
-  if (/\b(start)\b/.test(lower)) return send("You’re opted in. Reply HELP for info.");
-  if (/\b(help)\b/.test(lower))  return send(`${BRAND_NAME}: Msg&data rates may apply. Reply STOP to opt out.`);
-
-  // Retry controls available anytime
-  if (/\b(retry|now|call\s*again|call\s*back)\b/.test(lower)) {
-    const details = lastCallByPatient.get(from);
-    if (!details || !details.to) return send("I don’t have a clinic on file to call back. Start a new request first.");
-    cancelRetry(from);
-    try {
-      await startClinicCall(details);
-      return send(`Calling ${details.clinicName} again now. I’ll text the result.`);
-    } catch {
-      return send(`Couldn’t place the call just now. Reply RETRY again in a moment, or WAIT 5 / WAIT 15.`);
-    }
-  }
-  if (/\bwait\s*5\b/.test(lower)) {
-    const details = lastCallByPatient.get(from);
-    if (!details || !details.to) return send("No clinic on file. Start a new request first.");
-    cancelRetry(from);
-    scheduleRetry(from, details, SHORT_WAIT_MS);
-    return send("Okay—will retry in 5 minutes.");
-  }
-  if (/\bwait\s*15\b/.test(lower)) {
-    const details = lastCallByPatient.get(from);
-    if (!details || !details.to) return send("No clinic on file. Start a new request first.");
-    cancelRetry(from);
-    scheduleRetry(from, details, DEFAULT_RETRY_MS);
-    return send("Got it—will retry in 15 minutes.");
-  }
-  if (/^cancel$/.test(lower)) {
-    const cancelled = cancelRetry(from);
-    return send(cancelled ? "Okay, cancelled the scheduled retry." : "No retry was scheduled.");
-  }
-
-  // Preferred clinic SMS commands
-  if (/^my\s+clinic\s*:/i.test(body)) {
-    const after = body.split(/:/i)[1] || '';
-    const parts = after.split('|').map(s => s.trim());
-    const name = parts[0] || '';
-    const phone = parts[1] || '';
-    const address = parts[2] || '';
-    if (!name || !phone) return send('Please use: MY CLINIC: Name | +1XXXXXXXXXX | Address (optional)');
-    savePreferredClinic(from, { name, phone, address });
-    const list = getPreferredClinics(from);
-    return send(`Saved. You now have ${list.length} clinic${list.length>1?'s':''} on file.\nReply CLINICS to view, or NEW to start a booking.`);
-  }
-  if (/^clinics$/i.test(body)) {
-    const list = getPreferredClinics(from);
-    if (!list.length) return send('No clinics saved. Add one with:\nMY CLINIC: Name | +1XXXXXXXXXX | Address');
-    const lines = list.map((c,i)=>`${i+1}) ${c.name}${c.phone?' — '+c.phone:''}${c.address?' — '+c.address:''}`);
-    return send(`Your clinics:\n${lines.join('\n')}\n\nReply NEW to start, or CLEAR CLINICS to remove all.`);
-  }
-  if (/^clear\s+clinics$/i.test(body)) {
-    preferredClinicsByPatient.delete(from);
-    return send('Cleared your saved clinics.');
-  }
-  if (/^save\s+clinic$/i.test(body)) {
-    const last = lastCallByPatient.get(from);
-    if (!last || !last.clinicName || !last.to) return send(`I don’t have a recent clinic to save. Try again after a booking.`);
-    savePreferredClinic(from, { name: last.clinicName, phone: last.to, address: '' });
-    return send(`Saved ${last.clinicName}. Reply CLINICS to view.`);
-  }
-
-  // --- Conversational intake state machine ---
   let s = smsSessions.get(from);
 
-  // Start NEW / RESET at any time
   if (!s || /\b(new|restart|reset)\b/.test(lower)) {
-    s = {
-      state: 'intake_name',
-      firstName: '', lastName: '', patientName: '',
-      symptoms: '', zip: '', insuranceY: null,
-      dateStr: '', timeStr: '', windowText: '',
-      specialty: ''
-    };
+    s = { state: "intake_name" };
     smsSessions.set(from, s);
-    return send(
-      `Welcome to ${BRAND_NAME} — ${BRAND_SLOGAN}.\n` +
-      `I’ll ask a few quick questions to book your appointment.\n` +
-      `You can reply BACK to correct the previous answer or CANCEL to stop.\n\n` +
-      nextIntakePrompt(s)
-    );
+    return send(`Welcome to ${BRAND_NAME} — ${BRAND_SLOGAN}.\nLet's begin.\n${nextIntakePrompt(s)}`);
   }
 
-  // Global controls
-  if (/^cancel$/.test(lower)) {
-    smsSessions.delete(from);
-    cancelRetry(from);
-    return send('Cancelled. Text NEW anytime to start again.');
-  }
-  if (/^back$/.test(lower)) {
-    if (!s) return send('Nothing to go back to. Text NEW to start.');
-    const order = ['intake_name','intake_symptoms','intake_zip','intake_ins','intake_date','intake_time','confirm_intake'];
-    const idx = order.indexOf(s.state);
-    const prev = Math.max(0, idx - 1);
-    s.state = order[prev];
-    smsSessions.set(from, s);
-    return send(`Okay—let’s go back.\n${nextIntakePrompt(s)}`);
+  if (s.state === "intake_name") {
+    const fl = splitFirstLast(body);
+    if (!fl) return "Please enter first and last name.";
+    s.firstName = fl.first; s.lastName = fl.last; s.patientName = `${fl.first} ${fl.last}`;
+    s.state = "intake_symptoms"; smsSessions.set(from, s);
+    return nextIntakePrompt(s);
   }
 
-  // Intake flow
-  if (s && s.state?.startsWith('intake')) {
-
-    if (s.state === 'intake_name') {
-      let firstLast = null;
-      if (isValidNameLF(body)) {
-        const parsed = parseNameLF(body);
-        firstLast = { first: parsed.first, last: parsed.last };
-      } else {
-        firstLast = splitFirstLast(body);
-      }
-      if (!firstLast) return send('Please enter the patient name as "First Last".');
-      s.firstName = firstLast.first;
-      s.lastName  = firstLast.last;
-      s.patientName = `${s.firstName} ${s.lastName}`;
-      s.state = 'intake_symptoms';
-      smsSessions.set(from, s);
-      return send(nextIntakePrompt(s));
-    }
-
-    if (s.state === 'intake_symptoms') {
-      if (body.length < 2) return send('Give me a short phrase (e.g., "ear pain", "sprained ankle").');
-      s.symptoms = body;
-      s.specialty = inferSpecialty(body);
-      s.state = 'intake_zip';
-      smsSessions.set(from, s);
-      return send(nextIntakePrompt(s));
-    }
-
-    if (s.state === 'intake_zip') {
-      if (!isValidZip(body)) return send('ZIP should be 5 digits (e.g., 30309).');
-      s.zip = body.trim();
-      s.state = 'intake_ins';
-      smsSessions.set(from, s);
-      return send(nextIntakePrompt(s));
-    }
-
-    if (s.state === 'intake_ins') {
-      if (!isValidYN(body)) return send('Reply Y or N for insurance.');
-      s.insuranceY = ynToBool(body);
-      s.state = 'intake_date';
-      smsSessions.set(from, s);
-      return send(nextIntakePrompt(s));
-    }
-
-    if (s.state === 'intake_date') {
-      if (!isValidDate(body)) return send('Use MM/DD/YYYY (e.g., 10/07/2025).');
-      s.dateStr = body.trim();
-      s.state = 'intake_time';
-      smsSessions.set(from, s);
-      return send(nextIntakePrompt(s));
-    }
-
-    if (s.state === 'intake_time') {
-      if (!isValidTime(body)) return send('Use a time like 10:30 AM.');
-      s.timeStr = body.trim();
-      s.windowText = `${s.dateStr} ${s.timeStr}`;
-      s.state = 'confirm_intake';
-      smsSessions.set(from, s);
-      return send(nextIntakePrompt(s));
-    }
-
-    if (s.state === 'confirm_intake') {
-      if (!/^yes\b/i.test(body)) return send('Please reply YES to continue, or BACK to edit.');
-      const mine = getPreferredClinics(from);
-      s.state = mine.length ? 'choose_source' : 'select_clinic';
-      smsSessions.set(from, s);
-
-      if (mine.length) {
-        s.preferredList = mine;
-        smsSessions.set(from, s);
-        const listStr = mine.slice(0,3).map((c,i)=>`${i+1}) ${c.name}${c.address? ' — '+c.address : ''}`).join('\n');
-        return send(
-          `Great. Would you like me to try your usual clinic first?\n` +
-          `${listStr}${mine.length>3?`\n…and ${mine.length-3} more.`:''}\n\n` +
-          `Reply MINE to use #1, MINE 2 (or 3) to pick another, or NEARBY to search clinics near ${s.zip}.`
-        );
-      }
-
-      // no saved clinics → search nearby
-      const clinics = await findClinics(s.zip, s.specialty);
-      s.clinics = clinics;
-      const top = clinics[0];
-      if (!top) {
-        s.state = 'intake_zip';
-        smsSessions.set(from, s);
-        return send(`I couldn’t find clinics near ${s.zip}. Please re-enter ZIP or reply CANCEL.`);
-      }
-      s.chosenClinic = { name: top.name, phone: top.phone, address: top.address };
-      smsSessions.set(from, s);
-
-      return send(
-        `Found: ${top.name}${top.address ? ' — ' + top.address : ''}\n` +
-        `Book for ${s.windowText}? Reply YES to call, or NEXT for another option.`
-      );
-    }
+  if (s.state === "intake_symptoms") {
+    s.symptoms = body;
+    s.state = "intake_zip"; smsSessions.set(from, s);
+    return nextIntakePrompt(s);
   }
 
-  // Choose preferred vs nearby
-  if (s?.state === 'choose_source') {
-    const mMine = body.match(/^mine\s*(\d+)?$/i);
-    if (mMine) {
-      const idx = Math.max(1, parseInt(mMine[1]||'1',10)) - 1;
-      const mine = s.preferredList || [];
-      const pick = mine[idx];
-      if (!pick) return send(`I don’t have that index. Reply MINE for #1, MINE 2, or NEARBY.`);
-      if (!pick.phone) return send(`Your saved clinic doesn’t have a phone on file. Update it via:\nMY CLINIC: Name | +1XXXXXXXXXX | Address`);
-      s.state = 'calling';
-      s.chosenClinic = { name: pick.name, phone: pick.phone, address: pick.address };
-      smsSessions.set(from, s);
-      try {
-        await startClinicCall({
-          to: pick.phone,
-          name: s.patientName,
-          reason: s.symptoms,
-          preferredTimes: [s.windowText],
-          clinicName: pick.name,
-          callback: from
-        });
-        return send(`Calling ${pick.name} now to book for ${s.windowText}. I’ll text you the confirmation.\nIf it fails, reply RETRY / WAIT 5 / WAIT 15 / CANCEL.`);
-      } catch {
-        return send(`Couldn’t start the call just now. Reply MINE again or NEARBY to search alternatives.`);
-      }
-    }
-
-    if (/^nearby$/i.test(body)) {
-      const clinics = await findClinics(s.zip, s.specialty);
-      s.clinics = clinics;
-      const top = clinics[0];
-      if (!top) {
-        s.state = 'intake_zip';
-        smsSessions.set(from, s);
-        return send(`I couldn’t find clinics nearby. Re-enter ZIP or reply CANCEL.`);
-      }
-      s.state = 'select_clinic';
-      s.chosenClinic = { name: top.name, phone: top.phone, address: top.address };
-      smsSessions.set(from, s);
-      return send(
-        `Found: ${top.name}${top.address ? ' — ' + top.address : ''}\n` +
-        `Book for ${s.windowText}? Reply YES to call, or NEXT for another option.`
-      );
-    }
-
-    return send(`Reply MINE (or MINE 2) to use your saved clinic, or NEARBY to search clinics.`);
+  if (s.state === "intake_zip") {
+    if (!isValidZip(body)) return "ZIP should be 5 digits.";
+    s.zip = body; s.state = "intake_ins"; smsSessions.set(from, s);
+    return nextIntakePrompt(s);
   }
 
-  // Selecting/confirming clinic (NEARBY flow)
-  if (s?.state === 'select_clinic') {
-    if (/^yes\b/i.test(body)) {
-      if (!s?.chosenClinic?.phone) {
-        return send(`This clinic didn’t list a phone. Reply NEXT for another option or RESET to start over.`);
-      }
-      try {
-        await startClinicCall({
-          to: s.chosenClinic.phone,
-          name: s.patientName,
-          reason: s.symptoms,
-          preferredTimes: [s.windowText],
-          clinicName: s.chosenClinic.name,
-          callback: from
-        });
-        s.state = 'calling';
-        smsSessions.set(from, s);
-        return send(`Calling ${s.chosenClinic.name} now to book for ${s.windowText}. I’ll text you the confirmation.\nIf it fails, reply RETRY / WAIT 5 / WAIT 15 / CANCEL.`);
-      } catch {
-        return send(`Couldn’t start the call just now. Reply YES again in a moment, or NEXT for another option.`);
-      }
-    }
-    if (/^next\b/i.test(body)) {
-      const list = s.clinics || [];
-      const idx = list.findIndex(c => c.name === s.chosenClinic?.name);
-      const next = list[idx + 1];
-      if (!next) return send('No more options nearby. Reply RESET to start over or change ZIP.');
-      s.chosenClinic = { name: next.name, phone: next.phone, address: next.address };
-      smsSessions.set(from, s);
-      return send(`Next: ${next.name}${next.address ? ' — ' + next.address : ''}\nBook for ${s.windowText}? Reply YES to call, or NEXT for another option.`);
-    }
-    return send(`Reply YES to call this clinic, or NEXT for another option.`);
+  if (s.state === "intake_ins") {
+    if (!isValidYN(body)) return "Reply Y or N.";
+    s.insuranceY = ynToBool(body);
+    s.state = "intake_date"; smsSessions.set(from, s);
+    return nextIntakePrompt(s);
   }
 
-  if (s?.state === 'calling') {
-    return send(`I’m on it. I’ll text you once I confirm the time. You can also reply RETRY / WAIT 5 / WAIT 15 / CANCEL.`);
+  if (s.state === "intake_date") {
+    if (!isValidDate(body)) return "Use MM/DD/YYYY.";
+    s.dateStr = body; s.state = "intake_time"; smsSessions.set(from, s);
+    return nextIntakePrompt(s);
   }
 
-  return send(`Reply NEW to begin a booking. To save your usual clinic: MY CLINIC: Name | +1XXXXXXXXXX | Address`);
+  if (s.state === "intake_time") {
+    if (!isValidTime(body)) return "Use time like 10:30 AM.";
+    s.timeStr = body; s.state = "confirm_intake"; smsSessions.set(from, s);
+    return nextIntakePrompt(s);
+  }
+
+  if (s.state === "confirm_intake") {
+    if (!/^yes\b/i.test(body)) return "Please reply YES to continue.";
+    const clinics = await findClinics(s.zip, s.specialty || "primary care");
+    const top = clinics[0];
+    if (!top) return "No clinics found. Try again.";
+    await startClinicCall({
+      to: top.phone, name: s.patientName, reason: s.symptoms,
+      preferredTimes: [`${s.dateStr} ${s.timeStr}`],
+      clinicName: top.name, callback: from,
+    });
+    s.state = "calling"; smsSessions.set(from, s);
+    return `Calling ${top.name} to book for ${s.dateStr} ${s.timeStr}. I’ll text you the result.`;
+  }
+
+  if (s.state === "calling") return "Call in progress. I’ll text you once confirmed.";
+  return "Reply NEW to start a booking.";
+}
+
+// --- Twilio SMS webhook ---
+app.post("/sms", async (req, res) => {
+  const twiml = new twilioPkg.twiml.MessagingResponse();
+  const from = req.body.From?.trim();
+  const body = req.body.Body?.trim();
+  const reply = await handleText(from, body);
+  twiml.message(reply);
+  res.type("text/xml").send(twiml.toString());
 });
 
-// ---------- Server ----------
-app.listen(PORT, () => {
-  console.log(`Concierge listening on :${PORT}`);
+// --- App chat endpoint ---
+app.post("/app-chat", async (req, res) => {
+  const { userId, message } = req.body || {};
+  if (!userId || !message) return res.status(400).json({ ok: false, error: "userId and message required" });
+  try {
+    const reply = await handleText(`app:${userId}`, message);
+    return res.json({ ok: true, reply });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
 });
+
+// --- Twilio /gather endpoint (voice AI call) ---
+app.post("/gather", async (req, res) => {
+  const twiml = new twilioPkg.twiml.VoiceResponse();
+  const transcript = (req.body.SpeechResult || "").trim();
+  const lower = transcript.toLowerCase();
+  const session = req.session || {};
+
+  // Detect "anytime / walk-in"
+  const anyTimeRe = /\b(any\s*time|anytime|come anytime|walk.?in|free all day|no appointment needed)\b/i;
+  if (anyTimeRe.test(lower)) {
+    const askSlot = `Thank you. Could we put ${session.userRequest?.name || "the patient"} on the schedule at your earliest specific time today or tomorrow morning?`;
+    const g = twiml.gather({ input: "speech", action: "/gather", method: "POST" });
+    speak(g, askSlot);
+    return res.type("text/xml").send(twiml.toString());
+  }
+
+  const noTimeInfo = /\b(no specific time|no need|just walk in|come by any time)\b/i;
+  if (noTimeInfo.test(lower)) {
+    const askBring = `Understood. Is there anything that ${session.userRequest?.name || "the patient"} needs to bring?`;
+    const g2 = twiml.gather({ input: "speech", action: "/gather", method: "POST" });
+    speak(g2, askBring);
+    return res.type("text/xml").send(twiml.toString());
+  }
+
+  twiml.say("Thank you for confirming. Goodbye.");
+  res.type("text/xml").send(twiml.toString());
+});
+
+// --- Health check ---
+app.get("/healthz", (_, res) => res.json({ ok: true, status: "up" }));
+
+// --- Start server ---
+app.listen(PORT, () => console.log(`🚀 ${BRAND_NAME} listening on ${PORT}`));
