@@ -4,6 +4,27 @@ import dotenv from "dotenv";
 import bodyParser from "body-parser";
 import twilioPkg from "twilio";
 import fetch from "node-fetch";
+import cors from "cors";
+
+// allow your Vercel site + local dev
+const ALLOWED_ORIGINS = [
+  "https://clarity-frontend-three.vercel.app",
+  /\.vercel\.app$/ // any vercel preview
+];
+
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // allow server-to-server / curl
+    if (ALLOWED_ORIGINS.some(o => (o instanceof RegExp ? o.test(origin) : o === origin))) {
+      return cb(null, true);
+    }
+    return cb(new Error("CORS blocked for origin " + origin));
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"]
+}));
+app.options("*", cors()); // handle preflight
+
 
 dotenv.config();
 
@@ -197,15 +218,24 @@ app.post("/sms", async (req, res) => {
 
 // --- App chat endpoint ---
 app.post("/app-chat", async (req, res) => {
-  const { userId, message } = req.body || {};
-  if (!userId || !message) return res.status(400).json({ ok: false, error: "userId and message required" });
   try {
+    console.log("POST /app-chat", {
+      origin: req.headers.origin,
+      ua: req.headers["user-agent"],
+      body: req.body
+    });
+    const { userId, message } = req.body || {};
+    if (!userId || !message) {
+      return res.status(400).json({ ok: false, error: "userId and message required" });
+    }
     const reply = await handleText(`app:${userId}`, message);
     return res.json({ ok: true, reply });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    console.error("Error in /app-chat:", err);
+    return res.status(500).json({ ok: false, error: err.message || "server_error" });
   }
 });
+
 
 // --- Twilio /gather endpoint (voice AI call) ---
 app.post("/gather", async (req, res) => {
