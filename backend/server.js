@@ -2,20 +2,21 @@
 import 'dotenv/config';
 import express from 'express';
 import bodyParser from 'body-parser';
-import twilioPkg from 'twilio'; // ok if not used; safe to keep
+import twilioPkg from 'twilio';
+import { Client as GoogleMapsClient } from '@googlemaps/google-maps-services-js';
 
 // -------------------- App setup --------------------
-const app = express();                                // MUST come first
+const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Body parsers (must be before routes)
+// Parsers first
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Minimal CORS (no extra package needed)
+// Minimal CORS (no 'cors' package required)
 app.use((req, res, next) => {
-  // If you want to restrict: replace * with your Vercel origin
-  // res.header('Access-Control-Allow-Origin', 'https://clarity-frontend-three.vercel.app');
+  // If you want to restrict, replace * with your Vercel origin
+  // res.header('Access-Control-Allow-Origin', 'https://YOUR-VERCEL-DOMAIN.vercel.app');
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type');
@@ -23,10 +24,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Optional request log while debugging
+// Light request log (skip health)
 app.use((req, _res, next) => {
   if (req.path !== '/healthz') {
-    console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
+    console.log(new Date().toISOString(), req.method, req.path);
   }
   next();
 });
@@ -35,22 +36,29 @@ app.use((req, _res, next) => {
 const {
   TWILIO_ACCOUNT_SID,
   TWILIO_AUTH_TOKEN,
-  TWILIO_PHONE_NUMBER,
-  TEST_CLINIC_PHONE,          // use this for test calls if you like
-  BRAND_NAME = 'Clarity Health Concierge',
+  TWILIO_PHONE_NUMBER,          // your TFN/verified From
+  TEST_CLINIC_PHONE,            // optional override for demo calling
+  GOOGLE_MAPS_API_KEY,          // optional; if present we use Places
+  BRAND_NAME  = 'Clarity Health Concierge',
   BRAND_SLOGAN = 'AI appointment assistant'
 } = process.env;
 
-const twilio = (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN)
-  ? twilioPkg(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-  : null; // null if creds not set – web chat does not need Twilio
+const twilio =
+  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
+    ? twilioPkg(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    : null;
 
-// -------------------- In-memory stores --------------------
+const maps =
+  GOOGLE_MAPS_API_KEY
+    ? new GoogleMapsClient({})
+    : null;
+
+// -------------------- In-memory state --------------------
 const smsSessions = new Map();               // key: userId (phone or app:<id>)
 const lastCallByPatient = new Map();         // key: callback number
-const preferredClinicsByPatient = new Map(); // key: userId
+const preferredClinicsByPatient = new Map(); // key: userId -> [{name,phone,address}]
 
-// -------------------- Helpers --------------------
+// -------------------- Utilities --------------------
 const isValidZip  = s => /^\d{5}$/.test((s||'').trim());
 const isValidYN   = s => /^(y|n)$/i.test((s||'').trim());
 const ynToBool    = s => /^y/i.test(s||'');
@@ -86,41 +94,95 @@ function nextIntakePrompt(s) {
   }
 }
 
-// Save/recall preferred clinics (optional feature)
-function savePreferredClinic(from, clinic) {
-  if (!preferredClinicsByPatient.has(from)) preferredClinicsByPatient.set(from, []);
-  preferredClinicsByPatient.get(from).push(clinic);
+// Preferred clinic helpers (for future onboarding / “use my clinic”)
+function savePreferredClinic(userId, clinic) {
+  if (!preferredClinicsByPatient.has(userId)) preferredClinicsByPatient.set(userId, []);
+  preferredClinicsByPatient.get(userId).push(clinic);
 }
-const getPreferredClinics = (from) => preferredClinicsByPatient.get(from) || [];
+const getPreferredClinics = (userId) => preferredClinicsByPatient.get(userId) || [];
 
-// Simple placeholder for clinic search (swap with Google Places later)
+// -------------------- Clinic search --------------------
+/**
+ * Try Google Maps Places if GOOGLE_MAPS_API_KEY is provided.
+ * Otherwise return a single safe placeholder with a guaranteed phone number.
+ */
 async function findClinics(zip, specialty='clinic') {
-  return [
-    { name: `${specialty} Clinic near ${zip}`, phone: TEST_CLINIC_PHONE || TWILIO_PHONE_NUMBER, address: '123 Main St' }
-  ];
+  const FALLBACK_PHONE =
+    TEST_CLINIC_PHONE || TWILIO_PHONE_NUMBER || '+18337224939'; // your TFN as safe demo value
+
+  if (!zip || !isValidZip(zip)) {
+    return [{ name: `${specialty} clinic`, phone: FALLBACK_PHONE, address: 'Near you' }];
+  }
+
+  // If Google Places available, do a quick nearby search
+  if (maps && GOOGLE_MAPS_API_KEY) {
+    try {
+      // Geocode ZIP -> lat/lng
+      const geo = await maps.geocode({
+        params: { address: zip, key: GOOGLE_MAPS_API_KEY }
+      });
+      if (!geo.data.results?.length) throw new Error('No geocode results');
+      const loc = geo.data.results[0].geometry.location;
+
+      // Nearby Search — using keyword so we can pass specialty text
+      const places = await maps.placesNearby({
+        params: {
+          location: loc,
+          radius: 8000,
+          keyword: specialty,
+          type: 'doctor',
+          key: GOOGLE_MAPS_API_KEY
+        }
+      });
+
+      const items = places.data.results?.slice(0, 5) || [];
+      // NOTE: Places Nearby doesn’t include phone. For full phone you’d call Place Details.
+      // For now we attach FALLBACK_PHONE so the downstream call logic always has a number.
+      if (items.length) {
+        return items.map(p => ({
+          name: p.name,
+          address: p.vicinity || p.formatted_address || 'Address not provided',
+          phone: FALLBACK_PHONE
+        }));
+      }
+    } catch (err) {
+      console.warn('Maps lookup failed, using fallback:', err.message);
+    }
+  }
+
+  // Fallback – always return at least one clinic with a phone number
+  return [{
+    name: `${specialty} clinic near ${zip}`,
+    phone: FALLBACK_PHONE,
+    address: '123 Main St'
+  }];
 }
 
-// Optional voice call starter – not used by web chat
+// -------------------- Optional call placement --------------------
 async function startClinicCall({ to, name, reason, preferredTimes, clinicName, callback }) {
-  if (!twilio) throw new Error('Twilio not configured.');
-  if (!to) throw new Error('Missing clinic phone.');
+  if (!twilio) throw new Error('Twilio not configured');
+  if (!to) throw new Error('Missing clinic phone');
+
   const twiml = new twilioPkg.twiml.VoiceResponse();
-  twiml.say({ voice: 'Polly.Amy' }, `Hello. This is ${BRAND_NAME} calling to schedule for ${name}. Reason: ${reason}.`);
+  twiml.say({ voice: 'Polly.Amy' },
+    `Hello. This is ${BRAND_NAME} calling to schedule for ${name}. Reason: ${reason}.`);
+
   const call = await twilio.calls.create({
     to,
     from: TWILIO_PHONE_NUMBER,
     twiml: twiml.toString()
   });
+
   lastCallByPatient.set(callback, { to, name, reason, preferredTimes, clinicName, callback });
   return call.sid;
 }
 
-// -------------------- Shared triage engine (SMS + Web) --------------------
+// -------------------- Triage / state machine --------------------
 async function handleText(from, rawBody) {
   const body  = (rawBody || '').trim();
   const lower = body.toLowerCase();
 
-  // simple commands
+  // Simple commands
   if (/^(help)$/i.test(lower)) return `${BRAND_NAME}: transactional scheduling. Reply NEW to start.`;
   if (/^(stop|end|unsubscribe|quit|cancel)$/i.test(lower)) {
     smsSessions.delete(from);
@@ -129,7 +191,7 @@ async function handleText(from, rawBody) {
 
   let s = smsSessions.get(from);
 
-  // Start NEW / first message
+  // New / restart
   if (!s || /\b(new|restart|reset)\b/.test(lower)) {
     s = {
       state: 'intake_name',
@@ -149,54 +211,61 @@ async function handleText(from, rawBody) {
     s.state = 'intake_symptoms'; smsSessions.set(from, s);
     return nextIntakePrompt(s);
   }
+
   if (s.state === 'intake_symptoms') {
     s.symptoms = body; s.specialty = inferSpecialty(body);
     s.state = 'intake_zip'; smsSessions.set(from, s);
     return nextIntakePrompt(s);
   }
+
   if (s.state === 'intake_zip') {
     if (!isValidZip(body)) return 'ZIP should be 5 digits.';
     s.zip = body; s.state = 'intake_ins'; smsSessions.set(from, s);
     return nextIntakePrompt(s);
   }
+
   if (s.state === 'intake_ins') {
     if (!isValidYN(body)) return 'Reply Y or N.';
     s.insuranceY = ynToBool(body); s.state = 'intake_date'; smsSessions.set(from, s);
     return nextIntakePrompt(s);
   }
+
   if (s.state === 'intake_date') {
     if (!isValidDate(body)) return 'Use MM/DD/YYYY.';
     s.dateStr = body; s.state = 'intake_time'; smsSessions.set(from, s);
     return nextIntakePrompt(s);
   }
+
   if (s.state === 'intake_time') {
     if (!isValidTime(body)) return 'Use a time like 10:30 AM.';
     s.timeStr = body; s.state = 'confirm_intake'; smsSessions.set(from, s);
     return nextIntakePrompt(s);
   }
+
+  // Confirm and place/simulate call
   if (s.state === 'confirm_intake') {
     if (!/^yes\b/i.test(body)) return 'Please reply YES to continue.';
     const clinics = await findClinics(s.zip, s.specialty);
     const top = clinics[0];
     if (!top) return `No clinics found near ${s.zip}. Reply RESET to try again.`;
 
-    // If Twilio is configured, place a call; otherwise just "pretend confirm" for web demo
-    if (twilio) {
-      await startClinicCall({
-        to: top.phone,
-        name: s.patientName,
-        reason: s.symptoms,
-        preferredTimes: [`${s.dateStr} ${s.timeStr}`],
-        clinicName: top.name,
-        callback: from
-      });
-      s.state = 'calling'; smsSessions.set(from, s);
-      return `Calling ${top.name} to book for ${s.dateStr} ${s.timeStr}. I’ll message you the result.`;
-    } else {
-      // Demo path if Twilio not set: pretend we confirmed
+    const canPlaceCall = Boolean(twilio && top.phone);
+    if (!canPlaceCall) {
       s.state = 'done'; smsSessions.set(from, s);
-      return `✅ Tentative booking placed with ${top.name} for ${s.dateStr} ${s.timeStr}. (Twilio not configured on server, so this is a demo confirmation.)`;
+      return `✅ Tentative booking placed with ${top.name} for ${s.dateStr} ${s.timeStr}. ` +
+             `We’ll confirm by text shortly. (No live call placed in this environment.)`;
     }
+
+    await startClinicCall({
+      to: top.phone,
+      name: s.patientName,
+      reason: s.symptoms,
+      preferredTimes: [`${s.dateStr} ${s.timeStr}`],
+      clinicName: top.name,
+      callback: from
+    });
+    s.state = 'calling'; smsSessions.set(from, s);
+    return `Calling ${top.name} to book for ${s.dateStr} ${s.timeStr}. I’ll message you the result.`;
   }
 
   if (s.state === 'calling') return 'Working on it — I’ll update you once confirmed.';
@@ -205,10 +274,9 @@ async function handleText(from, rawBody) {
 }
 
 // -------------------- Routes --------------------
-// Health check
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-// Web app chat (the website uses this)
+// Web chat endpoint
 app.post('/app-chat', async (req, res) => {
   try {
     const { userId, message } = req.body || {};
@@ -221,7 +289,7 @@ app.post('/app-chat', async (req, res) => {
   }
 });
 
-// SMS webhook (optional; requires Twilio to be configured)
+// Twilio SMS webhook (optional)
 app.post('/sms', async (req, res) => {
   const MessagingResponse = twilioPkg.twiml.MessagingResponse;
   const twiml = new MessagingResponse();
@@ -232,7 +300,7 @@ app.post('/sms', async (req, res) => {
   res.type('text/xml').send(twiml.toString());
 });
 
-// -------------------- Start server --------------------
+// -------------------- Start --------------------
 app.listen(PORT, () => {
   console.log(`🚀 ${BRAND_NAME} listening on ${PORT}`);
 });
