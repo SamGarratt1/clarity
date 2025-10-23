@@ -1,4 +1,4 @@
-const API_URL = "https://clarity-mo5i.onrender.com"; // your backend
+const API_URL = "https://clarity-mo5i.onrender.com"; // backend
 
 // persistent user id
 function uid(){
