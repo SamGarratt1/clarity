@@ -4,109 +4,84 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Clarity Health Concierge</title>
-  <link rel="stylesheet" href="chat.css" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=3" />
 </head>
 <body>
+  <!-- Header Navigation -->
   <header class="site-header">
     <div class="container nav">
-      <div class="brand">Clarity Health Concierge</div>
-      <a class="call-link" href="tel:+18337224939">+1 (833) 722-4939</a>
+      <a class="brand" href="/">Clarity Health Concierge</a>
+      <nav class="menu">
+        <a href="#about">About</a>
+        <a class="start" href="/chat/">Start</a>
+      </nav>
     </div>
   </header>
 
+  <!-- Hero Section -->
   <section class="hero">
     <div class="container hero-inner">
       <div class="hero-copy">
         <h1>Book medical appointments in minutes.</h1>
-        <p>Your personal AI assistant handles triage and calls clinics for you—no hold music, no hassle.</p>
+        <p>Your AI assistant handles triage and calls clinics for you — no hold music, no hassle.</p>
         <div class="hero-cta">
-          <a class="btn primary" href="sms:+18337224939?&body=NEW">Text NEW to +1 (833) 722-4939</a>
-          <a class="btn ghost" href="#how-it-works">See how it works</a>
+          <a class="btn primary" href="/chat/">Start now</a>
+          <a class="btn ghost" href="#about">Learn more</a>
         </div>
         <p class="micro">Transactional SMS only. Reply STOP to opt out, HELP for help.</p>
       </div>
       <div class="hero-art">
-        <img src="https://images.unsplash.com/photo-1580281657527-47f249e8f9b8?q=80&w=900&auto=format&fit=crop"
+        <img src="https://images.unsplash.com/photo-1580281657527-47f249e8f9b8?q=80&w=1200&auto=format&fit=crop"
              alt="Assistant coordinating a clinic call" loading="lazy" />
       </div>
     </div>
   </section>
 
-  <section id="how-it-works" class="section">
+  <!-- How It Works -->
+  <section id="about" class="section">
     <div class="container">
       <h2>How it works</h2>
       <div class="grid">
         <div class="card">
           <h3>1. Say what's needed</h3>
-          <p>Start a chat here or text <b>NEW</b>. We’ll ask for your name, symptoms, location, and time preferences.</p>
+          <p>Start the chat and share your name, symptoms, ZIP code, and preferred time — no app to download.</p>
         </div>
         <div class="card">
           <h3>2. We find a clinic</h3>
-          <p>We look for nearby options or your usual clinic, then call to lock in a time that works.</p>
+          <p>We contact your usual clinic or nearby options and secure the earliest available slot for you.</p>
         </div>
         <div class="card">
           <h3>3. You get confirmation</h3>
-          <p>We send you the date, time, and any documents to bring—plus retry/hold handling if the line is busy.</p>
+          <p>We text you the date, time, and any documents to bring — plus retry or hold handling if the line is busy.</p>
         </div>
       </div>
     </div>
   </section>
 
+  <!-- SMS Disclosure -->
   <section class="section pale">
     <div class="container">
       <h2>SMS Consent Disclosure</h2>
-      <p>By texting <b>NEW</b> to <a href="tel:+18337224939">+1 (833) 722-4939</a>, you consent to receive
+      <p>
+        By texting <b>NEW</b> to <a href="tel:+18337224939">+1 (833) 722-4939</a>, you consent to receive
         <b>transactional messages</b> from Clarity Health Concierge about scheduling, confirmations, and reminders.
-        Message &amp; data rates may apply. Message frequency varies. Reply <b>STOP</b> to opt out or <b>HELP</b> for help.
-        No marketing messages.</p>
+        Message & data rates may apply. Message frequency varies.
+        Reply <b>STOP</b> to opt out or <b>HELP</b> for help. No marketing messages.
+      </p>
       <p>See our <a href="privacy.html">Privacy Policy</a> and <a href="terms.html">Terms of Service</a>.</p>
     </div>
   </section>
 
+  <!-- Footer -->
   <footer class="site-footer">
     <div class="container">
       <div>© 2025 Clarity Health Concierge</div>
       <div class="links">
         <a href="privacy.html">Privacy</a>
         <a href="terms.html">Terms</a>
+        <a href="/chat/" class="footer-start">Start</a>
       </div>
     </div>
   </footer>
-
-  <!-- Chat Widget -->
-  <div id="chat-root">
-    <button id="chat-toggle" class="chat__fab" aria-label="Open chat" type="button">💬</button>
-
-    <div id="chat-panel" class="chat__panel" hidden>
-      <div class="chat__head">
-        <div class="chat__brand">Clarity Assistant</div>
-        <button id="chat-close" class="chat__close" aria-label="Close" type="button">×</button>
-      </div>
-
-      <div id="chat-log" class="chat__log" role="log" aria-live="polite"></div>
-
-      <div class="chat__form" id="chat-row">
-        <input id="chat-input" class="chat__input" type="text" placeholder="Type here…" />
-        <button id="chat-send" class="chat__send" type="button">Send</button>
-      </div>
-
-      <div class="chat__quick">
-        <button class="chip" type="button" data-q="NEW">Start</button>
-        <button class="chip" type="button" data-q="MINE">My clinic</button>
-        <button class="chip" type="button" data-q="NEARBY">Nearby</button>
-        <button class="chip" type="button" data-q="HELP">Help</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="chat-status"
-       style="position:fixed;left:8px;bottom:8px;font:12px/1.2 system-ui;
-       background:#eef;border:1px solid #99f;padding:4px 6px;border-radius:6px;
-       z-index:10000;opacity:.85">
-    chat: not loaded
-  </div>
-
-  <script src="app.js" defer></script>
 </body>
 </html>
