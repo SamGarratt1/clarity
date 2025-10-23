@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clarity — Chat</title>
+  <link rel="stylesheet" href="chat-full.css" />
+</head>
+<body>
+  <header class="chat-header">
+    <div class="wrap">
+      <a href="index.html" class="brand">Clarity Health Concierge</a>
+      <a class="call" href="tel:+18337224939">+1 (833) 722-4939</a>
+    </div>
+  </header>
+
+  <main class="chat-wrap">
+    <section class="thread" id="thread" aria-live="polite"></section>
+
+    <section class="composer">
+      <div class="bar">
+        <input id="msg" type="text" placeholder="Type a message…" autocomplete="off" />
+        <button id="send" type="button">Send</button>
+      </div>
+      <div class="quick">
+        <button class="chip" data-q="NEW">Start</button>
+        <button class="chip" data-q="MINE">Use my usual clinic</button>
+        <button class="chip" data-q="HELP">Help</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="chat-full.js" defer></script>
+</body>
+</html>
