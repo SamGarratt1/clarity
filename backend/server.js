@@ -99,6 +99,18 @@ const cleanUSPhone = s => {
   return null;
 };
 
+// ---- distance helper (Haversine) ----
+function milesBetween(a, b) {
+  if (!a || !b) return null;
+  const toRad = d => (d * Math.PI) / 180;
+  const R = 3958.7613; // miles
+  const dLat = toRad((b.lat - a.lat));
+  const dLng = toRad((b.lng - a.lng));
+  const lat1 = toRad(a.lat), lat2 = toRad(b.lat);
+  const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 // ---------- Maps ----------
 function inferSpecialty(symptoms = '') {
   const s = symptoms.toLowerCase();
@@ -113,31 +125,32 @@ function inferSpecialty(symptoms = '') {
   return 'clinic';
 }
 
-// Fetch clinics near ZIP, then get phone via Place Details
-async function findClinics(zip, specialty = 'clinic') {
+// Fetch clinics near ZIP, add Place Details (phone), distance + tags
+async function findClinics(zip, specialty = 'clinic', needLowCost = false) {
   try {
     const geoResp = await mapsClient.geocode({
       params: { address: zip, key: GOOGLE_MAPS_API_KEY }
     });
     if (!geoResp.data.results.length) return [];
-    const { lat, lng } = geoResp.data.results[0].geometry.location;
+    const origin = geoResp.data.results[0].geometry.location; // {lat,lng}
 
     const placesResp = await mapsClient.placesNearby({
       params: {
-        location: { lat, lng },
-        radius: 8000,
+        location: origin,
+        radius: 12000, // ~7.5mi
         keyword: specialty,
         type: 'doctor',
         key: GOOGLE_MAPS_API_KEY
       }
     });
 
-    const basics = (placesResp.data.results || []).slice(0, 6).map(p => ({
+    const basics = (placesResp.data.results || []).slice(0, 10).map(p => ({
       place_id: p.place_id,
       name: p.name,
       address: p.vicinity || p.formatted_address || '',
       rating: p.rating || null,
-      location: p.geometry?.location,
+      loc: p.geometry?.location || null,
+      openNow: p.opening_hours?.open_now ?? null
     }));
 
     const detailed = [];
@@ -152,26 +165,59 @@ async function findClinics(zip, specialty = 'clinic') {
               'international_phone_number',
               'formatted_address',
               'website',
-              'opening_hours'
+              'opening_hours',
+              'types'
             ],
             key: GOOGLE_MAPS_API_KEY
           }
         });
         const d = details.data.result || {};
+        const phone = d.international_phone_number || d.formatted_phone_number || null;
+        const distanceMiles = b.loc ? Math.round((milesBetween(origin, b.loc) || 0) * 10) / 10 : null;
+        const types = d.types || [];
+        const likelyLowCost = needLowCost || /free|community/i.test(b.name) || types.some(t => /health|community|clinic/.test(t));
+        const tags = [];
+        if (distanceMiles != null && distanceMiles <= 2.0) tags.push('closest');
+        if (b.openNow === true || d.opening_hours?.open_now) tags.push('open now');
+        if (likelyLowCost) tags.push('low cost');
+
         detailed.push({
           name: d.name || b.name,
           address: d.formatted_address || b.address || '',
           rating: b.rating,
-          location: b.location,
-          phone: d.international_phone_number || d.formatted_phone_number || null,
+          phone,
           website: d.website || null,
-          hours: d.opening_hours?.weekday_text || null
+          distanceMiles,
+          openNow: (b.openNow === true) || (d.opening_hours?.open_now === true) || false,
+          tags
         });
       } catch {
-        detailed.push({ ...b, phone: null });
+        const distanceMiles = b.loc ? Math.round((milesBetween(origin, b.loc) || 0) * 10) / 10 : null;
+        const tags = [];
+        if (distanceMiles != null && distanceMiles <= 2.0) tags.push('closest');
+        if (needLowCost) tags.push('low cost');
+        detailed.push({
+          name: b.name,
+          address: b.address,
+          rating: b.rating,
+          phone: null,
+          website: null,
+          distanceMiles,
+          openNow: b.openNow === true,
+          tags
+        });
       }
     }
-    return detailed;
+
+    // sort by distance asc, then rating desc
+    detailed.sort((a, b) => {
+      const da = a.distanceMiles ?? 999, db = b.distanceMiles ?? 999;
+      if (da !== db) return da - db;
+      const ra = a.rating ?? 0, rb = b.rating ?? 0;
+      return rb - ra;
+    });
+
+    return detailed.slice(0, 6);
   } catch (e) {
     console.error('Maps API error:', e.message);
     return [];
@@ -234,7 +280,6 @@ async function startClinicCall({ to, name, reason, preferredTimes, clinicName, c
     onHoldSince: null
   });
 
-  // remember for SMS-driven retry
   if (callback) {
     lastCallByPatient.set(callback, { to, name, reason, preferredTimes, clinicName, callback });
   }
@@ -290,8 +335,8 @@ async function proceedToBooking(s) {
   }
 
   if (!clinic.phone) {
-    s.state = 'select_clinic';
-    return `I found ${clinic.name}, but couldn't retrieve a phone number to call. Try NEXT for another clinic, or type HOME to restart.`;
+    s.state = 'confirm_intake';
+    return `Heads up — ${clinic.name} didn’t list a phone number I can dial. Choose another clinic (1–6) or type NEXT.`;
   }
 
   if (s.userPhone) {
@@ -545,7 +590,7 @@ app.post('/status', async (req, res) => {
   return res.sendStatus(200);
 });
 
-// ---------- SMS webhook (still supported) ----------
+// ---------- SMS webhook (kept simple) ----------
 app.post('/sms', async (req, res) => {
   const MessagingResponse = twilioPkg.twiml.MessagingResponse;
   const twiml = new MessagingResponse();
@@ -557,7 +602,6 @@ app.post('/sms', async (req, res) => {
 
   const send = (text) => { twiml.message(text); return res.type('text/xml').send(twiml.toString()); };
 
-  // A2P keywords
   if (/\b(stop|end|unsubscribe|quit|cancel)\b/.test(lower)) {
     cancelRetry(from);
     return send("You’re opted out and won’t receive more texts. Reply START to opt back in.");
@@ -577,27 +621,8 @@ app.post('/sms', async (req, res) => {
       return send(`Couldn’t place the call just now. Reply RETRY again in a moment, or WAIT 5 / WAIT 15.`);
     }
   }
-  if (/\bwait\s*5\b/.test(lower)) {
-    const details = lastCallByPatient.get(from);
-    if (!details || !details.to) return send("No clinic on file. Start a new request first.");
-    cancelRetry(from);
-    scheduleRetry(from, details, SHORT_WAIT_MS);
-    return send("Okay—will retry in 5 minutes.");
-  }
-  if (/\bwait\s*15\b/.test(lower)) {
-    const details = lastCallByPatient.get(from);
-    if (!details || !details.to) return send("No clinic on file. Start a new request first.");
-    cancelRetry(from);
-    scheduleRetry(from, details, DEFAULT_RETRY_MS);
-    return send("Got it—will retry in 15 minutes.");
-  }
-  if (/\bcancel\b/.test(lower)) {
-    const cancelled = cancelRetry(from);
-    return send(cancelled ? "Okay, cancelled the scheduled retry." : "No retry was scheduled.");
-  }
 
-  // For brevity, SMS intake flow omitted here (web app supersedes). You can keep your old SMS logic if needed.
-  return send("Thanks! For now, please use our website chat to start a request: clarity frontend.");
+  return send("Thanks! Please use our website chat to start a request.");
 });
 
 // ---------- Web Chat API ----------
@@ -605,7 +630,7 @@ app.post('/app-chat', async (req, res) => {
   const { userId, message } = req.body || {};
   if (!userId || !message) return res.status(400).json({ ok: false, error: 'Missing userId or message' });
 
-  const say = (text) => res.json({ ok: true, reply: text });
+  const say = (text, extra = {}) => res.json({ ok: true, reply: text, ...extra });
 
   let s = sessionsChat.get(userId);
 
@@ -636,7 +661,7 @@ app.post('/app-chat', async (req, res) => {
   const msg = message.trim();
 
   // quick intents
-  if (/^\s*help\s*$/i.test(msg)) return say("I’ll ask your name, symptoms, ZIP, insurance (Y/N), and preferred date & time. Then I’ll contact a clinic for you.\nType HOME to restart any time.");
+  if (/^\s*help\s*$/i.test(msg)) return say("I’ll ask your name, symptoms, ZIP, insurance (Y/N), and preferred date & time. Then I’ll show nearby clinics with reasons and call to book.\nType HOME to restart any time.");
   if (/^\s*mine\s*$/i.test(msg)) {
     const usual = userUsualClinics.get(userId);
     if (!usual) return say("I don’t have a usual clinic saved yet. After we book today, I can save it for next time.");
@@ -676,7 +701,6 @@ app.post('/app-chat', async (req, res) => {
   }
 
   if (s.state === 'intake_preferred') {
-    // accept either strict format or chrono free-form
     let d = '', t = '';
     if (/,/.test(msg) && isValidDate(msg.split(',')[0]) && isValidTime(msg.split(',')[1] || '')) {
       d = msg.split(',')[0].trim();
@@ -689,26 +713,39 @@ app.post('/app-chat', async (req, res) => {
       }
     }
     if (!d || !t) return say("I couldn’t read that date/time. Try like: 10/25/2025, 10:30 AM — or say “tomorrow morning”.");
-    s.dateStr = d; s.timeStr = t;
 
-    // find clinics now
+    s.dateStr = d; s.timeStr = t;
     const specialty = inferSpecialty(s.symptoms);
-    const list = await findClinics(s.zip, s.insuranceY ? specialty : 'free clinic');
+    const list = await findClinics(s.zip, s.insuranceY ? specialty : 'free clinic', !s.insuranceY);
     s.clinics = list;
     if (!list.length) {
       s.state = 'intake_zip';
       return say("I couldn’t find clinics nearby. What ZIP should I search near?");
     }
+
     s.chosenClinic = list[0];
     s.state = 'confirm_intake';
-    const top = s.chosenClinic;
     return say(
-      `Here’s an option: ${top.name}${top.address ? ' — ' + top.address : ''}${top.phone? ' ('+top.phone+')':''}.\n` +
-      `Book for ${s.dateStr} ${s.timeStr}? (YES to call, or NEXT for another option)`
+      `I found nearby options. Pick one or reply NEXT to see more.\nPreferred: ${s.dateStr} ${s.timeStr}`,
+      { clinics: list.map((c, i) => ({
+          id: i, name: c.name, address: c.address, phone: c.phone,
+          rating: c.rating, distanceMiles: c.distanceMiles, openNow: c.openNow, tags: c.tags
+        }))
+      }
     );
   }
 
   if (s.state === 'confirm_intake') {
+    // numeric selection 1–6
+    const m = msg.match(/^\s*([1-6])\s*$/);
+    if (m && s.clinics?.length) {
+      const idx = parseInt(m[1], 10) - 1;
+      if (s.clinics[idx]) {
+        s.chosenClinic = s.clinics[idx];
+        return say(`Selected: ${s.chosenClinic.name}. Reply YES to proceed, NEXT for another, or NO to change time.`);
+      }
+    }
+
     if (/^yes\b/i.test(msg)) {
       if (s.source === 'web' && !s.userPhone) {
         s.state = 'await_phone';
@@ -721,15 +758,15 @@ app.post('/app-chat', async (req, res) => {
       const list = s.clinics || [];
       const idx = list.findIndex(c => c.name === s.chosenClinic?.name);
       const next = list[idx + 1];
-      if (!next) return say("That’s the last option I found. Type YES to use it, or HOME to restart.");
+      if (!next) return say("That’s the last option I found. Type the number (1–6) to pick, YES to use current, or HOME to restart.");
       s.chosenClinic = next;
-      return say(`Next: ${next.name}${next.address ? ' — ' + next.address : ''}${next.phone? ' ('+next.phone+')':''}.\nYES to use this, or NEXT again.`);
+      return say(`Next: ${next.name}${next.address ? ' — ' + next.address : ''}${next.phone? ' ('+next.phone+')':''}.\nYES to use, NEXT again, or pick 1–6.`);
     }
     if (/^no\b/i.test(msg)) {
       s.state = 'intake_preferred';
       return say("No problem—what’s a better date/time?");
     }
-    return say("Please reply YES to proceed, NEXT for another clinic, or NO to change the time.");
+    return say("Please reply YES to proceed, NEXT for another clinic, a number 1–6 to pick, or NO to change the time.");
   }
 
   if (s.state === 'await_phone') {
