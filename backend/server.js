@@ -79,20 +79,38 @@ function inferSpecialty(symptom='') {
   if (/urgent|fever|cough|injury/.test(s)) return 'urgent care';
   return 'primary care';
 }
+// ---- phone helpers (add under other helpers) ----
+const phoneRe = /^\+1\d{10}$|^\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$/;
+const cleanUSPhone = s => {
+  if (!s) return null;
+  const digits = (s.replace(/[^\d]/g, '') || '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return null;
+};
+
 
 function nextIntakePrompt(s) {
   switch (s.state) {
-    case 'intake_name': return 'What is the patient’s full name? (First Last)';
-    case 'intake_symptoms': return 'What’s the reason for the visit? (brief)';
-    case 'intake_zip': return 'What ZIP code should I search near? (5 digits)';
-    case 'intake_ins': return 'Do you have insurance? (Y/N)';
-    case 'intake_date': return 'What date works best? (MM/DD/YYYY)';
-    case 'intake_time': return 'Preferred time? (e.g., 10:30 AM)';
+    case 'intake_name':
+      return 'Great — whose appointment is this for? Please share the full name like "Jane Doe".';
+    case 'intake_symptoms':
+      return 'Thanks, Jane. In one or two lines, what’s going on? (e.g., “sore throat and fever” or “ankle pain”).';
+    case 'intake_zip':
+      return 'What ZIP code should I search near? (5 digits)';
+    case 'intake_ins':
+      return 'Do you have insurance I should mention if asked? Reply Y or N.';
+    case 'intake_date':
+      return 'What day works best? (MM/DD/YYYY)';
+    case 'intake_time':
+      return 'Any time preference? Share a time like “10:30 AM”.';
     case 'confirm_intake':
-      return `Confirm: ${s.patientName} — "${s.symptoms}" near ${s.zip} on ${s.dateStr} at ${s.timeStr}. Reply YES to continue.`;
-    default: return 'Reply NEW to start over.';
+      return `Let me make sure I’ve got it right:\n• Name: ${s.patientName}\n• Reason: ${s.symptoms}\n• Area: ${s.zip}\n• When: ${s.dateStr} at ${s.timeStr}\n\nIf that looks good, reply YES and I’ll start calling.`;
+    default:
+      return 'Reply NEW to start over.';
   }
 }
+
 
 // Preferred clinic helpers (for future onboarding / “use my clinic”)
 function savePreferredClinic(userId, clinic) {
@@ -192,6 +210,7 @@ async function handleText(from, rawBody) {
   let s = smsSessions.get(from);
 
   // New / restart
+  // New / restart
   if (!s || /\b(new|restart|reset)\b/.test(lower)) {
     s = {
       state: 'intake_name',
@@ -200,8 +219,9 @@ async function handleText(from, rawBody) {
       dateStr: '', timeStr: '', specialty: ''
     };
     smsSessions.set(from, s);
-    return `Welcome to ${BRAND_NAME} — ${BRAND_SLOGAN}.\n${nextIntakePrompt(s)}`;
+    return `Hi! I’m your Clarity assistant. I’ll ask a couple quick questions, then call the clinic and book the earliest slot for you.\n\nWhat is the patient’s full name? (First Last)`;
   }
+
 
   // Intake steps
   if (s.state === 'intake_name') {
@@ -303,4 +323,17 @@ app.post('/sms', async (req, res) => {
 // -------------------- Start --------------------
 app.listen(PORT, () => {
   console.log(`🚀 ${BRAND_NAME} listening on ${PORT}`);
+});
+
+// Simple anti-spam (30 requests/min per IP)
+const rateLimit = {};
+app.use((req, res, next) => {
+  const ip = req.ip;
+  const now = Date.now();
+  rateLimit[ip] = rateLimit[ip] || [];
+  rateLimit[ip] = rateLimit[ip].filter(ts => now - ts < 60_000);
+  if (rateLimit[ip].length > 30)
+    return res.status(429).send('Too many requests, slow down.');
+  rateLimit[ip].push(now);
+  next();
 });
