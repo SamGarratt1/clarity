@@ -389,7 +389,7 @@ function spamCheck(userId, ip, text){
   ur.lastText = txt;
 
   if (/[A-Z]{24,}/.test(txt)) return { ok:false, reason:'Please avoid excessive ALL CAPS.' };
-  if (BLOCKLIST.some(rx=>rx.test(txt))) return { ok:false, reason:'Inappropriate content blocked.' });
+  if (BLOCKLIST.some(rx=>rx.test(txt))) return { ok:false, reason:'Inappropriate content blocked.' };
 
   // daily cost brake (rough: count chars we process)
   const today=new Date().toDateString();
