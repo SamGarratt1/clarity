@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Clarity Assistant • Chat</title>
-  <link rel="stylesheet" href="/style.css?v=7"/>
+  <link rel="stylesheet" href="/style.css?v=9"/>
 </head>
 <body>
   <header class="site-header">
@@ -33,10 +33,11 @@
         <div id="stream" class="stream" aria-live="polite"></div>
 
         <div class="tools">
-          <button class="btn" data-quick="Start">Start</button>
-          <button class="btn" data-quick="My clinic">My clinic</button>
-          <button class="btn" data-quick="Nearby">Nearby</button>
-          <button class="btn" data-quick="HELP">HELP</button>
+          <button class="btn" data-send="Start">Start</button>
+          <button class="btn" data-send="My clinic">My clinic</button>
+          <button class="btn" data-send="Nearby">Nearby</button>
+          <button class="btn" data-send="HELP">HELP</button>
+          <button class="btn" data-send="ASAP">ASAP</button>
         </div>
 
         <div class="input-row">
@@ -65,14 +66,14 @@
   </footer>
 
   <script>
-    // ====== Backend base (Render). Change this to your URL, no trailing slash. ======
+    // ====== Backend base (Render). Change to your URL, no trailing slash. ======
     const BACKEND_BASE = 'https://YOUR-RENDER-APP.onrender.com';
-    // ===============================================================================
+    // ==========================================================================
 
     const API_BASE = (new URLSearchParams(location.search).get('api') || BACKEND_BASE).replace(/\/$/,'');
     const SID_KEY='clarity.sid'; const sid=localStorage.getItem(SID_KEY)||crypto.randomUUID(); localStorage.setItem(SID_KEY,sid);
 
-    // language buttons
+    // language toggle
     const LANGS=[{c:'en',t:'English'},{c:'es',t:'Español'},{c:'fr',t:'Français'},{c:'pt',t:'Português'},{c:'ar',t:'العربية'},{c:'zh',t:'中文'},{c:'hi',t:'हिन्दी'}];
     let lang=localStorage.getItem('clarity.lang')||'en';
     const row=document.getElementById('langRow');
@@ -81,13 +82,13 @@
       LANGS.forEach(L=>{
         const b=document.createElement('button'); b.textContent=L.t;
         if(L.c===lang) b.classList.add('active');
-        b.onclick=()=>{ lang=L.c; localStorage.setItem('clarity.lang',lang); addSys(`Language set to ${L.t}.`); paintLang(); };
+        b.onclick=()=>{ lang=L.c; localStorage.setItem('clarity.lang',lang); addSys(`Language set to ${L.t}.`); };
         row.appendChild(b);
       });
     }
     paintLang();
 
-    // UI helpers
+    // chat UI helpers
     const stream=document.getElementById('stream');
     function el(t,c){const x=document.createElement(t); if(c) x.className=c; return x;}
     function addMsg(who,txt,you=false){
@@ -97,9 +98,7 @@
     }
     function addSys(t){ addMsg('sys', `<span class="dim">${t}</span>`); }
 
-    // quick buttons
-    document.querySelectorAll('[data-quick]').forEach(b=> b.onclick=()=>{ chatInput.value=b.dataset.quick; chatInput.focus(); });
-
+    // sending
     const chatInput=document.getElementById('chatInput');
     const chatSend=document.getElementById('chatSend');
     async function sendText(text){
@@ -107,7 +106,7 @@
       addMsg('you', clean, true); chatInput.value='';
       const payload={from:'web',text:clean,sid,lang};
 
-      const urls=[`${API_BASE}/webchat`,`${API_BASE}/chat`];
+      const urls=[`${API_BASE}/webchat`,`${API_BASE}/chat`]; // fallback if only /chat exists
       let data=null,last=null;
       for(const u of urls){
         try{
@@ -123,8 +122,16 @@
     function doSend(){ sendText(chatInput.value); }
     chatSend.onclick=doSend; chatInput.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); doSend(); }});
 
-    // greeting
-    addMsg('assistant','Welcome to Clarity — I’ll grab the details and book for you. Type <strong>Start</strong> to begin, or choose your language above.');
+    // quick buttons auto-fire
+    document.querySelectorAll('[data-send]').forEach(b=>{
+      b.addEventListener('click', ()=> sendText(b.dataset.send));
+    });
+
+    // greeting + autostart
+    addMsg('assistant','Welcome to Clarity — I’ll grab the details and book for you. Tap <strong>Start</strong> or choose your language above.');
+    if (new URLSearchParams(location.search).get('autostart') === '1') {
+      setTimeout(()=> sendText('Start'), 300);
+    }
   </script>
 </body>
 </html>
