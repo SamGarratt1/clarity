@@ -2,7 +2,8 @@
   "version": 2,
   "public": true,
   "rewrites": [
-    { "source": "/chat",  "destination": "/chat/index.html" },
-    { "source": "/chat/", "destination": "/chat/index.html" }
+    { "source": "/chat",        "destination": "/chat/index.html" },
+    { "source": "/chat/",       "destination": "/chat/index.html" },
+    { "source": "/chat/(.*)",   "destination": "/chat/index.html" }
   ]
 }
