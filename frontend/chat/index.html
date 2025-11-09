@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Clarity Assistant — Chat</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/style.css" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Clarity Assistant • Chat</title>
+  <link rel="stylesheet" href="/style.css?v=4"/>
 </head>
 <body>
   <header class="site-header">
@@ -18,117 +18,95 @@
     </div>
   </header>
 
-  <main class="container chat-wrap">
-    <section class="chat-card" aria-label="Clarity chat">
-      <div class="chat-header">
-        <strong>Clarity Assistant</strong>
-        <span style="color:#8aa3c2">• live</span>
-        <select id="lang" class="lang-select" title="Language">
-          <option value="en" selected>English</option>
-          <option value="es">Español</option>
-          <option value="fr">Français</option>
-          <option value="pt">Português</option>
-        </select>
+  <div class="container chat-shell">
+    <div class="chat-card">
+      <div class="chat-head">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="badge">Assistant online</div>
+          <div class="small">Triage & booking</div>
+        </div>
+        <div class="lang-row" id="lang-row"></div>
       </div>
 
-      <div id="log" class="chat-log" role="log" aria-live="polite"></div>
+      <div id="stream" class="chat-body" aria-live="polite"></div>
 
-      <div class="chat-tools">
-        <button data-fast="NEW">Start</button>
-        <button data-fast="My clinic">My clinic</button>
-        <button data-fast="Nearby">Nearby</button>
-        <button data-fast="ASAP">ASAP</button>
-        <button data-fast="Help">Help</button>
+      <div class="toolrow">
+        <button data-quick="Start">Start</button>
+        <button data-quick="My clinic">My clinic</button>
+        <button data-quick="Nearby">Nearby</button>
+        <button data-quick="HELP">HELP</button>
       </div>
 
-      <form id="chat-form" class="chat-input" autocomplete="off">
-        <input id="chat-input" name="q" placeholder="Type a message…" />
-        <button id="chat-send" type="submit">Send</button>
-      </form>
-    </section>
-  </main>
+      <div class="chat-input">
+        <input id="chat-input" class="input" placeholder="Type a message…"/>
+        <button id="chat-send" class="send">Send</button>
+      </div>
+    </div>
+    <div class="helper small">Tip: say <em>ASAP</em> for the earliest slot. You can also text our toll-free number.</div>
+  </div>
 
   <script>
-    // ***** Configure this to your backend URL (Render) *****
-    // Example: https://clarity-mo5i.onrender.com
-    const API_URL = "https://clarity-mo5i.onrender.com";
+    // ===== Set your backend URL (Render) =====
+    const BACKEND_BASE = 'https://YOUR-RENDER-APP.onrender.com'; // change me
+    // ========================================
 
-    // stable "from" identity for web users
-    const FROM_ID = (() => {
-      const k = "clarity:web:user";
-      let v = localStorage.getItem(k);
-      if (!v) { v = "web:" + Math.random().toString(36).slice(2); localStorage.setItem(k, v); }
-      return v;
-    })();
+    const API_BASE = (new URLSearchParams(location.search).get('api') || BACKEND_BASE).replace(/\/$/,'');
+    const SID_KEY='clarity.sid'; const sid = localStorage.getItem(SID_KEY)||crypto.randomUUID(); localStorage.setItem(SID_KEY,sid);
 
-    const $log = document.getElementById('log');
-    const $form = document.getElementById('chat-form');
-    const $input = document.getElementById('chat-input');
-    const $lang = document.getElementById('lang');
+    const LANGS=[
+      {code:'en',label:'English'},{code:'es',label:'Español'},{code:'fr',label:'Français'},
+      {code:'pt',label:'Português'},{code:'ar',label:'العربية'},{code:'zh',label:'中文'},{code:'hi',label:'हिन्दी'}
+    ];
+    let currentLang=localStorage.getItem('clarity.lang')||'en';
 
-    function line(role, text) {
-      const row = document.createElement('div');
-      row.className = 'msg ' + (role === 'ai' ? 'ai' : 'user');
-      const b = document.createElement('div');
-      b.className = 'bubble';
-      const label = (role === 'ai') ? 'Assistant' : 'You';
-      b.innerHTML = `<b>${label}</b>${escapeHtml(text)}`;
-      row.appendChild(b);
-      $log.appendChild(row);
-      $log.scrollTop = $log.scrollHeight;
+    const stream=document.getElementById('stream'), input=document.getElementById('chat-input'), sendBtn=document.getElementById('chat-send');
+
+    // Build language buttons
+    const langRow=document.getElementById('lang-row');
+    function renderLang(){
+      langRow.innerHTML='';
+      LANGS.forEach(l=>{
+        const b=document.createElement('button'); b.textContent=l.label;
+        if(l.code===currentLang) b.classList.add('active');
+        b.onclick=()=>{ currentLang=l.code; localStorage.setItem('clarity.lang',currentLang); renderLang(); addSys(`Language set to ${l.label}.`); };
+        langRow.appendChild(b);
+      });
     }
+    renderLang();
 
-    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+    function el(t,c){const x=document.createElement(t); if(c) x.className=c; return x;}
+    function addMsg(who,text,isYou=false){
+      const row=el('div','msg'+(isYou?' you':'')), w=el('div','who'); w.textContent=isYou?'You':'Assistant';
+      const b=el('div','bubble'); b.innerHTML=(text||'').toString().replace(/\n/g,'<br>');
+      row.append(w,b); stream.append(row); stream.scrollTop=stream.scrollHeight;
+    }
+    function addSys(t){ addMsg('sys', `<span class="small">${t}</span>`); }
 
-    async function send(text) {
-      if(!text) return;
+    document.querySelectorAll('[data-quick]').forEach(b=> b.onclick=()=>{ input.value=b.dataset.quick; input.focus(); });
 
-      // render immediately
-      line('user', text);
-      $input.value = '';
+    async function sendText(text){
+      const clean=(text||'').toString().slice(0,2000); if(!clean) return;
+      addMsg('you', clean, true); input.value='';
+      const payload={from:'web',text:clean,sid,lang:currentLang};
 
-      try {
-        const res = await fetch(`${API_URL}/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from: FROM_ID,
-            text,
-            lang: $lang.value   // backend can use this to localize prompts
-          })
-        });
-
-        // Expect either JSON {reply:"..."} or plain text
-        const ct = res.headers.get('content-type') || '';
-        let msg = '';
-        if (ct.includes('application/json')) {
-          const j = await res.json();
-          msg = j.reply || j.message || JSON.stringify(j);
-        } else {
-          msg = await res.text();
-        }
-        line('ai', msg);
-      } catch (e) {
-        line('ai', 'Network error. Please try again.');
+      const urls=[`${API_BASE}/webchat`,`${API_BASE}/chat`];
+      let data=null,last=null;
+      for(const u of urls){
+        try{
+          const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+          if(r.ok){ data=await r.json(); break; } last=await r.text();
+        }catch(e){ last=e.message; }
       }
+      if(!data){ addMsg('assistant',`Server error: <code>${(last||'unknown')}</code>`); return; }
+
+      const replies = Array.isArray(data.replies)?data.replies:(data.reply?[data.reply]:[]);
+      if(!replies.length){ addMsg('assistant','No response received.'); return; }
+      for(const m of replies) addMsg('assistant', m);
     }
+    function doSend(){ sendText(input.value); }
+    sendBtn.onclick=doSend; input.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); doSend(); }});
 
-    // quick-action buttons
-    document.querySelectorAll('[data-fast]').forEach(btn => {
-      btn.addEventListener('click', () => send(btn.getAttribute('data-fast')));
-    });
-
-    // submit handler (prevents page refresh)
-    $form.addEventListener('submit', (ev) => {
-      ev.preventDefault();
-      send($input.value.trim());
-    });
-
-    // greet on first load
-    if (!sessionStorage.getItem('welcomed')) {
-      line('ai', 'Welcome to Clarity — I’ll grab the details and book for you. Type NEW to begin, or tap Start.');
-      sessionStorage.setItem('welcomed', '1');
-    }
+    addMsg('assistant','Welcome to Clarity — I’ll grab the details and book for you. Type <strong>Start</strong> to begin, or choose your language above.');
   </script>
 </body>
 </html>
