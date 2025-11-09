@@ -16,3 +16,4 @@ backend/.env.backup
 backend/.env.backup
 *.env
 *.backup
+.vercel

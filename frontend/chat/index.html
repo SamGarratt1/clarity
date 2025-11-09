@@ -1,35 +1,134 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Clarity — Chat</title>
-  <link rel="stylesheet" href="chat-full.css" />
+  <meta charset="utf-8" />
+  <title>Clarity Assistant — Chat</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <header class="chat-header">
-    <div class="wrap">
-      <a href="index.html" class="brand">Clarity Health Concierge</a>
-      <a class="call" href="tel:+18337224939">+1 (833) 722-4939</a>
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="/">Clarity Health Concierge</a>
+      <nav class="nav">
+        <a href="/">Home</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+      </nav>
     </div>
   </header>
 
-  <main class="chat-wrap">
-    <section class="thread" id="thread" aria-live="polite"></section>
+  <main class="container chat-wrap">
+    <section class="chat-card" aria-label="Clarity chat">
+      <div class="chat-header">
+        <strong>Clarity Assistant</strong>
+        <span style="color:#8aa3c2">• live</span>
+        <select id="lang" class="lang-select" title="Language">
+          <option value="en" selected>English</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+          <option value="pt">Português</option>
+        </select>
+      </div>
 
-    <section class="composer">
-      <div class="bar">
-        <input id="msg" type="text" placeholder="Type a message…" autocomplete="off" />
-        <button id="send" type="button">Send</button>
+      <div id="log" class="chat-log" role="log" aria-live="polite"></div>
+
+      <div class="chat-tools">
+        <button data-fast="NEW">Start</button>
+        <button data-fast="My clinic">My clinic</button>
+        <button data-fast="Nearby">Nearby</button>
+        <button data-fast="ASAP">ASAP</button>
+        <button data-fast="Help">Help</button>
       </div>
-      <div class="quick">
-        <button class="chip" data-q="NEW">Start</button>
-        <button class="chip" data-q="MINE">Use my usual clinic</button>
-        <button class="chip" data-q="HELP">Help</button>
-      </div>
+
+      <form id="chat-form" class="chat-input" autocomplete="off">
+        <input id="chat-input" name="q" placeholder="Type a message…" />
+        <button id="chat-send" type="submit">Send</button>
+      </form>
     </section>
   </main>
 
-  <script src="chat-full.js" defer></script>
+  <script>
+    // ***** Configure this to your backend URL (Render) *****
+    // Example: https://clarity-mo5i.onrender.com
+    const API_URL = "https://clarity-mo5i.onrender.com";
+
+    // stable "from" identity for web users
+    const FROM_ID = (() => {
+      const k = "clarity:web:user";
+      let v = localStorage.getItem(k);
+      if (!v) { v = "web:" + Math.random().toString(36).slice(2); localStorage.setItem(k, v); }
+      return v;
+    })();
+
+    const $log = document.getElementById('log');
+    const $form = document.getElementById('chat-form');
+    const $input = document.getElementById('chat-input');
+    const $lang = document.getElementById('lang');
+
+    function line(role, text) {
+      const row = document.createElement('div');
+      row.className = 'msg ' + (role === 'ai' ? 'ai' : 'user');
+      const b = document.createElement('div');
+      b.className = 'bubble';
+      const label = (role === 'ai') ? 'Assistant' : 'You';
+      b.innerHTML = `<b>${label}</b>${escapeHtml(text)}`;
+      row.appendChild(b);
+      $log.appendChild(row);
+      $log.scrollTop = $log.scrollHeight;
+    }
+
+    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+
+    async function send(text) {
+      if(!text) return;
+
+      // render immediately
+      line('user', text);
+      $input.value = '';
+
+      try {
+        const res = await fetch(`${API_URL}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: FROM_ID,
+            text,
+            lang: $lang.value   // backend can use this to localize prompts
+          })
+        });
+
+        // Expect either JSON {reply:"..."} or plain text
+        const ct = res.headers.get('content-type') || '';
+        let msg = '';
+        if (ct.includes('application/json')) {
+          const j = await res.json();
+          msg = j.reply || j.message || JSON.stringify(j);
+        } else {
+          msg = await res.text();
+        }
+        line('ai', msg);
+      } catch (e) {
+        line('ai', 'Network error. Please try again.');
+      }
+    }
+
+    // quick-action buttons
+    document.querySelectorAll('[data-fast]').forEach(btn => {
+      btn.addEventListener('click', () => send(btn.getAttribute('data-fast')));
+    });
+
+    // submit handler (prevents page refresh)
+    $form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      send($input.value.trim());
+    });
+
+    // greet on first load
+    if (!sessionStorage.getItem('welcomed')) {
+      line('ai', 'Welcome to Clarity — I’ll grab the details and book for you. Type NEW to begin, or tap Start.');
+      sessionStorage.setItem('welcomed', '1');
+    }
+  </script>
 </body>
 </html>
