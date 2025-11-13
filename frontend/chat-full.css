@@ -1,0 +1,141 @@
+/* Pull in the same dark theme + typography as the landing page */
+@import url("./style.css");
+
+/* Chat page layout */
+.chat-page {
+  min-height: 100vh;
+  background: radial-gradient(circle at top, #020617 0, #020617 60%, #000 100%);
+}
+
+.chat-shell {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 3rem;
+}
+
+/* Reuse the header styles from style.css */
+
+.chat-main-card {
+  margin-top: 2rem;
+  border-radius: 1.5rem;
+  background: radial-gradient(
+      circle at top left,
+      rgba(56, 189, 248, 0.16),
+      transparent 55%
+    ),
+    #020617;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  box-shadow: 0 24px 55px rgba(15, 23, 42, 0.9);
+  padding: 1.5rem 1.5rem 1.75rem;
+}
+
+.chat-main-card h1 {
+  font-size: 1.2rem;
+  margin-bottom: 0.25rem;
+}
+
+.chat-main-card p {
+  font-size: 0.86rem;
+  color: #cbd5f5;
+}
+
+/* Log area */
+
+#chat-log {
+  margin-top: 1.25rem;
+  margin-bottom: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1.1rem;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  max-height: 26rem;
+  overflow-y: auto;
+}
+
+/* Generic styling for whatever elements your JS appends */
+#chat-log > * {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin-bottom: 0.5rem;
+  color: #e5e7eb;
+}
+
+/* If you are using paragraphs, tighten them a bit */
+#chat-log p {
+  margin: 0 0 0.6rem;
+}
+
+/* Input row */
+
+.chat-input-row {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.chat-input-row input[type="text"],
+.chat-input-row input[type="search"],
+.chat-input-row input[type="tel"] {
+  flex: 1;
+  padding: 0.6rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: rgba(15, 23, 42, 0.95);
+  color: #e5e7eb;
+  font-size: 0.9rem;
+}
+
+.chat-input-row input::placeholder {
+  color: #6b7280;
+}
+
+.chat-input-row button {
+  min-width: 4.2rem;
+}
+
+/* Quick action buttons (Start / My clinic / ASAP / Help, etc.) */
+
+.chat-quick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.1rem;
+}
+
+.chat-quick-row button {
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: rgba(15, 23, 42, 0.85);
+  font-size: 0.78rem;
+  color: #e5e7eb;
+  cursor: pointer;
+  transition: background 0.12s ease, transform 0.08s ease,
+    box-shadow 0.12s ease;
+}
+
+.chat-quick-row button:hover {
+  background: rgba(56, 189, 248, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.7);
+}
+
+/* Tiny helper text under the chat */
+
+.chat-hint {
+  font-size: 0.78rem;
+  color: #9ca3af;
+  margin-top: 0.4rem;
+}
+
+/* Responsive */
+
+@media (max-width: 700px) {
+  .chat-main-card {
+    padding: 1.25rem 1rem 1.4rem;
+  }
+
+  #chat-log {
+    max-height: 22rem;
+  }
+}
