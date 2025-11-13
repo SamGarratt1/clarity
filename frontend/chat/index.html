@@ -2,136 +2,89 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Clarity Assistant • Chat</title>
-  <link rel="stylesheet" href="/style.css?v=9"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Clarity • Chat</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/style.css?v=2025-11-13">
 </head>
-<body>
+<body class="theme-dark">
   <header class="site-header">
-    <div class="container header-row">
-      <a class="brand" href="/">Clarity<span class="dot">.</span> Health Concierge</a>
+    <div class="container row between center">
+      <a class="brand" href="/">Clarity.</a>
       <nav class="nav">
-        <a href="/">Home</a>
+        <a href="/#how">About</a>
         <a href="/privacy.html">Privacy</a>
         <a href="/terms.html">Terms</a>
       </nav>
     </div>
   </header>
 
-  <main class="container section chat-wrap">
-    <div class="chat-grid">
-      <!-- Chat column -->
-      <section class="card chat-card" aria-label="Chat">
-        <div class="chat-head">
-          <div style="display:flex;align-items:center;gap:10px">
-            <div class="badge">Assistant online</div>
-            <div class="dim">Triage & booking</div>
-          </div>
-          <div id="langRow" class="langs"></div>
-        </div>
-
-        <div id="stream" class="stream" aria-live="polite"></div>
-
-        <div class="tools">
-          <button class="btn" data-send="Start">Start</button>
-          <button class="btn" data-send="My clinic">My clinic</button>
-          <button class="btn" data-send="Nearby">Nearby</button>
-          <button class="btn" data-send="HELP">HELP</button>
-          <button class="btn" data-send="ASAP">ASAP</button>
-        </div>
-
-        <div class="input-row">
-          <input id="chatInput" class="input" placeholder="Type a message…"/>
-          <button id="chatSend" class="send">Send</button>
-        </div>
-        <div class="helper">Tip: say <em>ASAP</em> for the earliest slot.</div>
-      </section>
-
-      <!-- Context column -->
-      <aside class="card side" aria-label="Info">
-        <h3 style="margin:0 0 10px">What this chat does</h3>
-        <div class="kv">
-          <div>Scope</div><div>Triage, clinic search, phone booking, confirmation</div>
-          <div>Ranking</div><div>Distance • Affordability • Availability • Your saved clinics</div>
-          <div>Languages</div><div>English, Español, Français, Português, العربية, 中文, हिन्दी</div>
-          <div class="rule"></div><div class="rule"></div>
-          <div>Privacy</div><div>Transactional only. No marketing. See Privacy & Terms.</div>
-        </div>
-      </aside>
+  <main class="container chat-shell">
+    <div class="row between center">
+      <h2>Triage &amp; booking</h2>
+      <span class="badge">Assistant online</span>
     </div>
+
+    <section class="chat-wrap">
+      <div id="messages" class="chat-panel messages" aria-live="polite"></div>
+
+      <div class="chat-panel input-row">
+        <input id="chat-input" type="text" placeholder="Type here…  (hint: try “Start”, “ASAP”, “My clinic”)"/>
+        <button id="chat-send" class="btn btn-primary">Send</button>
+      </div>
+    </section>
   </main>
 
-  <footer class="container footer">
-    © 2025 Clarity Health Concierge • <a class="dim" href="/privacy.html">Privacy</a> • <a class="dim" href="/terms.html">Terms</a>
+  <footer class="site-footer">
+    <div class="container row between center">
+      <small>© 2025 Clarity Health Concierge • v=2025-11-13</small>
+      <div class="row gap">
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+      </div>
+    </div>
   </footer>
 
   <script>
-    // ====== Backend base (Render). Change to your URL, no trailing slash. ======
-    const BACKEND_BASE = 'https://YOUR-RENDER-APP.onrender.com';
-    // ==========================================================================
+  // Minimal chat wire-up (expects your backend /webchat endpoint)
+  const API_URL = (window.CLARITY_API_URL || '').replace(/\/$/, '') || 'https://clarity-mo5i.onrender.com';
+  const messages = document.getElementById('messages');
+  const input    = document.getElementById('chat-input');
+  const sendBtn  = document.getElementById('chat-send');
 
-    const API_BASE = (new URLSearchParams(location.search).get('api') || BACKEND_BASE).replace(/\/$/,'');
-    const SID_KEY='clarity.sid'; const sid=localStorage.getItem(SID_KEY)||crypto.randomUUID(); localStorage.setItem(SID_KEY,sid);
+  function addMsg(who, text) {
+    const row = document.createElement('div');
+    row.className = 'msg ' + (who === 'user' ? 'user' : 'bot');
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    row.appendChild(bubble);
+    messages.appendChild(row);
+    messages.scrollTop = messages.scrollHeight;
+  }
 
-    // language toggle
-    const LANGS=[{c:'en',t:'English'},{c:'es',t:'Español'},{c:'fr',t:'Français'},{c:'pt',t:'Português'},{c:'ar',t:'العربية'},{c:'zh',t:'中文'},{c:'hi',t:'हिन्दी'}];
-    let lang=localStorage.getItem('clarity.lang')||'en';
-    const row=document.getElementById('langRow');
-    function paintLang(){
-      row.innerHTML='';
-      LANGS.forEach(L=>{
-        const b=document.createElement('button'); b.textContent=L.t;
-        if(L.c===lang) b.classList.add('active');
-        b.onclick=()=>{ lang=L.c; localStorage.setItem('clarity.lang',lang); addSys(`Language set to ${L.t}.`); };
-        row.appendChild(b);
+  async function send(text) {
+    if (!text.trim()) return;
+    addMsg('user', text);
+    input.value = '';
+    try {
+      const res = await fetch(`${API_URL}/webchat`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ from: 'web', text })
       });
+      if (!res.ok) throw new Error('Server error ' + res.status);
+      const data = await res.json(); // {reply: "..."}
+      addMsg('bot', data.reply || '(no reply)');
+    } catch (e) {
+      addMsg('bot', 'Server error. Check backend logs.');
     }
-    paintLang();
+  }
+  sendBtn.addEventListener('click', () => send(input.value));
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') send(input.value); });
 
-    // chat UI helpers
-    const stream=document.getElementById('stream');
-    function el(t,c){const x=document.createElement(t); if(c) x.className=c; return x;}
-    function addMsg(who,txt,you=false){
-      const row=el('div','msg'+(you?' you':'')), whoEl=el('div','who'); whoEl.textContent=you?'You':'Assistant';
-      const b=el('div','bubble'); b.innerHTML=(txt||'').toString().replace(/\n/g,'<br>');
-      row.append(whoEl,b); stream.append(row); stream.scrollTop=stream.scrollHeight;
-    }
-    function addSys(t){ addMsg('sys', `<span class="dim">${t}</span>`); }
-
-    // sending
-    const chatInput=document.getElementById('chatInput');
-    const chatSend=document.getElementById('chatSend');
-    async function sendText(text){
-      const clean=(text||'').toString().slice(0,2000); if(!clean) return;
-      addMsg('you', clean, true); chatInput.value='';
-      const payload={from:'web',text:clean,sid,lang};
-
-      const urls=[`${API_BASE}/webchat`,`${API_BASE}/chat`]; // fallback if only /chat exists
-      let data=null,last=null;
-      for(const u of urls){
-        try{
-          const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-          if(r.ok){ data=await r.json(); break; } last=await r.text();
-        }catch(e){ last=e.message; }
-      }
-      if(!data){ addMsg('assistant',`Server error: <code>${(last||'unknown')}</code>`); return; }
-
-      const replies = Array.isArray(data.replies)?data.replies:(data.reply?[data.reply]:[]);
-      replies.forEach(m=> addMsg('assistant', m));
-    }
-    function doSend(){ sendText(chatInput.value); }
-    chatSend.onclick=doSend; chatInput.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); doSend(); }});
-
-    // quick buttons auto-fire
-    document.querySelectorAll('[data-send]').forEach(b=>{
-      b.addEventListener('click', ()=> sendText(b.dataset.send));
-    });
-
-    // greeting + autostart
-    addMsg('assistant','Welcome to Clarity — I’ll grab the details and book for you. Tap <strong>Start</strong> or choose your language above.');
-    if (new URLSearchParams(location.search).get('autostart') === '1') {
-      setTimeout(()=> sendText('Start'), 300);
-    }
+  // greet
+  addMsg('bot','Welcome to Clarity — I’ll grab the details and book for you. Type NEW to begin, or say ASAP for the earliest slot.');
   </script>
 </body>
 </html>
