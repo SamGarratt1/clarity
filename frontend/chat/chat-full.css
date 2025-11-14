@@ -354,12 +354,12 @@ a:hover {
 
 .chat-input {
   flex: 1;
-  padding: 1rem 1.25rem;
+  padding: 1.25rem 1.5rem;
   border-radius: 16px;
   border: 1px solid var(--border);
-  background: rgba(15, 23, 42, 0.6);
-  color: var(--text);
-  font-size: 1rem;
+  background: rgba(15, 23, 42, 0.7);
+  color: #f1f5f9 !important;
+  font-size: 1.05rem;
   font-family: inherit;
   transition: all 0.2s ease;
 }
@@ -372,7 +372,8 @@ a:hover {
 }
 
 .chat-input::placeholder {
-  color: var(--text-muted);
+  color: #94a3b8;
+  opacity: 0.7;
 }
 
 .chat-send-btn {
