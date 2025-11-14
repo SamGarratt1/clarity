@@ -1,6 +1,6 @@
 // chat-full.js
 
-const API_URL = "https://clarity-mo5i.onrender.com"; // <- your Render backend base
+const API_URL = "https://clarity-mo5i.onrender.com"; // your Render backend
 
 const messagesEl = document.getElementById("chat-messages");
 const formEl = document.getElementById("chat-form");
@@ -10,7 +10,8 @@ const langButtons = document.querySelectorAll(".lang-pill");
 
 let currentLang = "en";
 
-// Helpers
+// ----- helpers -----
+
 function addMessage(role, text) {
   const row = document.createElement("div");
   row.className = "msg";
@@ -36,13 +37,14 @@ function setLang(lang) {
   });
 }
 
-// Initial greeting
+// initial greeting
 addMessage(
   "assistant",
-  "Welcome to Clarity — I'll grab the details and book for you. Type NEW to begin, or say ASAP for the earliest slot."
+  "Welcome to Clarity — I’ll grab the details and book for you. Type NEW to begin, or say ASAP for the earliest slot."
 );
 
-// Send to backend
+// ----- API -----
+
 async function sendToAssistant(text) {
   const payload = {
     message: text,
@@ -67,15 +69,15 @@ async function sendToAssistant(text) {
     if (data && data.reply) {
       addMessage("assistant", data.reply);
     } else {
-      addMessage("assistant", "I received a response but couldn't read it.");
+      addMessage("assistant", "I got a response but couldn’t read it.");
     }
   } catch (err) {
-    addMessage("assistant", "Network error talking to the server.");
     console.error(err);
+    addMessage("assistant", "Network problem talking to the server.");
   }
 }
 
-// Form submit
+// form submit
 formEl.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = (inputEl.value || "").trim();
@@ -86,11 +88,12 @@ formEl.addEventListener("submit", (e) => {
   sendToAssistant(text);
 });
 
-// Quick buttons
+// quick chips (Start / My clinic / Nearby / ASAP)
 quickButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
     const action = btn.dataset.quick;
     let text;
+
     switch (action) {
       case "NEW":
         text = "NEW";
@@ -113,13 +116,13 @@ quickButtons.forEach((btn) => {
   });
 });
 
-// Language selection buttons
+// language chips
 langButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
     setLang(btn.dataset.lang);
     addMessage(
       "assistant",
-      `Language set. I'll triage in your language, but translate for the clinic when we call.`
+      "Language updated. I’ll talk to you in this language and translate for the clinic when I call."
     );
   });
 });

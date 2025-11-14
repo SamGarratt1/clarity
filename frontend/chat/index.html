@@ -1,92 +1,113 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Clarity • Chat</title>
-  <link rel="icon" href="/favicon.ico">
-  <link rel="preload" as="style" href="./chat-full.css?v=2025-11-13-1">
-  <link rel="stylesheet" href="./chat-full.css?v=2025-11-13-1">
-
+  <meta charset="UTF-8" />
+  <title>Clarity Assistant – Triage & Booking</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- main site styles -->
+  <link rel="stylesheet" href="/style.css" />
+  <!-- chat-specific styles (relative to /chat/) -->
+  <link rel="stylesheet" href="chat-full.css" />
 </head>
-<body class="theme-dark">
+
+<body class="page page--dark">
   <header class="site-header">
-    <div class="container row between center">
-      <a class="brand" href="/">Clarity.</a>
+    <div class="shell shell--nav">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-text">Clarity Health Concierge</span>
+      </div>
       <nav class="nav">
-        <a href="/#how">About</a>
-        <a href="/privacy.html">Privacy</a>
-        <a href="/terms.html">Terms</a>
+        <a href="/" class="nav-link">Home</a>
+        <a href="/chat" class="nav-link nav-link--active">Start</a>
+        <a href="/privacy" class="nav-link">Privacy</a>
+        <a href="/terms" class="nav-link">Terms</a>
       </nav>
     </div>
   </header>
 
-  <main class="container chat-shell">
-    <div class="row between center">
-      <h2>Triage &amp; booking</h2>
-      <span class="badge">Assistant online</span>
-    </div>
+  <main class="chat-shell">
+    <section class="chat-card">
+      <header class="chat-header">
+        <div class="chat-header-main">
+          <h1>Clarity Assistant</h1>
+          <p class="chat-sub">
+            Online • Triage & clinic booking. Messages are private and encrypted in transit.
+          </p>
+        </div>
+      </header>
 
-    <section class="chat-wrap">
-      <div id="messages" class="chat-panel messages" aria-live="polite"></div>
-
-      <div class="chat-panel input-row">
-        <input id="chat-input" type="text" placeholder="Type here…  (hint: try “Start”, “ASAP”, “My clinic”)"/>
-        <button id="chat-send" class="btn btn-primary">Send</button>
+      <!-- Language selector -->
+      <div class="chat-langs">
+        <span class="chat-langs-label">Language</span>
+        <div class="chat-langs-pills">
+          <button data-lang="en" class="lang-pill lang-pill--active">English</button>
+          <button data-lang="es" class="lang-pill">Español</button>
+          <button data-lang="fr" class="lang-pill">Français</button>
+          <button data-lang="pt" class="lang-pill">Português</button>
+          <button data-lang="ar" class="lang-pill">العربية</button>
+          <button data-lang="hi" class="lang-pill">हिन्दी</button>
+        </div>
       </div>
+
+      <!-- Messages -->
+      <div id="chat-messages" class="chat-messages">
+        <!-- JS will add messages -->
+      </div>
+
+      <!-- Quick actions -->
+      <div class="chat-quick-row">
+        <span class="chat-quick-label">Quick actions</span>
+        <div class="chat-quick-buttons">
+          <button class="chip" data-quick="NEW">Start triage</button>
+          <button class="chip" data-quick="MY_CLINIC">Use my usual clinic</button>
+          <button class="chip" data-quick="NEARBY">Nearby options</button>
+          <button class="chip" data-quick="ASAP">ASAP time</button>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <form id="chat-form" class="chat-input-row" autocomplete="off">
+        <input
+          id="chat-input"
+          class="chat-input"
+          type="text"
+          placeholder="Type a message… (hint: try NEW or ASAP)"
+        />
+        <button id="chat-send" class="btn btn-primary chat-send-btn" type="submit">
+          Send
+        </button>
+      </form>
+
+      <p class="chat-footnote">
+        Tip: say <strong>ASAP</strong> for the earliest appointment. Reply
+        <strong>STOP</strong> by SMS to stop texts.
+      </p>
+    </section>
+
+    <section class="chat-info">
+      <h2>What this assistant does</h2>
+      <ul>
+        <li>Text-style intake for symptoms, ZIP/postcode, insurance & language.</li>
+        <li>Searches nearby or usual clinics and ranks by distance, affordability & availability.</li>
+        <li>Calls the clinic on your behalf to secure a time.</li>
+        <li>Supports multilingual triage; clinics are always called in English unless you specify otherwise.</li>
+        <li>Transactional only — no marketing.</li>
+      </ul>
     </section>
   </main>
 
   <footer class="site-footer">
-    <div class="container row between center">
-      <small>© 2025 Clarity Health Concierge • v=2025-11-13</small>
-      <div class="row gap">
-        <a href="/privacy.html">Privacy</a>
-        <a href="/terms.html">Terms</a>
+    <div class="shell footer-grid">
+      <p class="muted">© 2025 Clarity Health Concierge · v-2025-11-13</p>
+      <div class="footer-links">
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/">Home</a>
       </div>
     </div>
   </footer>
 
-  <script>
-  // Minimal chat wire-up (expects your backend /webchat endpoint)
-  const API_URL = (window.CLARITY_API_URL || '').replace(/\/$/, '') || 'https://clarity-mo5i.onrender.com';
-  const messages = document.getElementById('messages');
-  const input    = document.getElementById('chat-input');
-  const sendBtn  = document.getElementById('chat-send');
-
-  function addMsg(who, text) {
-    const row = document.createElement('div');
-    row.className = 'msg ' + (who === 'user' ? 'user' : 'bot');
-    const bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    bubble.textContent = text;
-    row.appendChild(bubble);
-    messages.appendChild(row);
-    messages.scrollTop = messages.scrollHeight;
-  }
-
-  async function send(text) {
-    if (!text.trim()) return;
-    addMsg('user', text);
-    input.value = '';
-    try {
-      const res = await fetch(`${API_URL}/webchat`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ from: 'web', text })
-      });
-      if (!res.ok) throw new Error('Server error ' + res.status);
-      const data = await res.json(); // {reply: "..."}
-      addMsg('bot', data.reply || '(no reply)');
-    } catch (e) {
-      addMsg('bot', 'Server error. Check backend logs.');
-    }
-  }
-  sendBtn.addEventListener('click', () => send(input.value));
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') send(input.value); });
-
-  // greet
-  addMsg('bot','Welcome to Clarity — I’ll grab the details and book for you. Type NEW to begin, or say ASAP for the earliest slot.');
-  </script>
+  <script src="/chat/chat-full.js"></script>
 </body>
 </html>
