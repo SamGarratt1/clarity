@@ -21,7 +21,7 @@ const {
   PORT = 10000,
   BRAND_NAME = 'Clarity Health Concierge',
   BRAND_SLOGAN = 'AI appointment assistant',
-  TTS_VOICE = 'Polly.Joanna-Neural'
+  TTS_VOICE = 'Matthew.Joanna-Neural'
 } = process.env;
 
 if (!PUBLIC_BASE_URL) throw new Error('Missing required env var: PUBLIC_BASE_URL');
@@ -223,44 +223,100 @@ const translations = {
 // Simple translation function using dictionary
 function translateText(msg, lang) {
   if (!lang || lang === 'en' || !translations[lang]) return msg;
+  if (!msg || msg.trim().length === 0) return msg;
   
-  // Direct lookup
+  // Direct lookup first
   if (translations[lang][msg]) {
     return translations[lang][msg];
   }
   
-  // Try to translate dynamic parts (with variables)
-  // Handle messages with variables like clinic names, dates, etc.
+  // Handle dynamic messages with variables
+  // Translate parts and reconstruct
+  let translated = msg;
+  
+  // Translate common phrases within the message
+  const commonPhrases = [
+    { en: 'I found', es: 'Encontré', fr: 'J\'ai trouvé', pt: 'Encontrei' },
+    { en: 'clinic', es: 'clínica', fr: 'clinique', pt: 'clínica' },
+    { en: 'clinics', es: 'clínicas', fr: 'cliniques', pt: 'clínicas' },
+    { en: 'near you. Here are the top options:', es: 'cerca de usted. Aquí están las mejores opciones:', fr: 'près de vous. Voici les meilleures options :', pt: 'perto de você. Aqui estão as melhores opções:' },
+    { en: 'Option', es: 'Opción', fr: 'Option', pt: 'Opção' },
+    { en: 'Pros:', es: 'Pros:', fr: 'Avantages :', pt: 'Prós:' },
+    { en: 'Cons:', es: 'Contras:', fr: 'Inconvénients :', pt: 'Contras:' },
+    { en: 'High rating', es: 'Calificación alta', fr: 'Note élevée', pt: 'Avaliação alta' },
+    { en: 'Good rating', es: 'Buena calificación', fr: 'Bonne note', pt: 'Boa avaliação' },
+    { en: 'Closest option', es: 'Opción más cercana', fr: 'Option la plus proche', pt: 'Opção mais próxima' },
+    { en: 'Lower rating', es: 'Calificación más baja', fr: 'Note plus basse', pt: 'Avaliação mais baixa' },
+    { en: 'Phone number not available', es: 'Número de teléfono no disponible', fr: 'Numéro de téléphone non disponible', pt: 'Número de telefone não disponível' },
+    { en: 'Great! You selected', es: '¡Excelente! Seleccionó', fr: 'Excellent ! Vous avez sélectionné', pt: 'Ótimo! Você selecionou' },
+    { en: 'Book for', es: 'Reservar para', fr: 'Réserver pour', pt: 'Agendar para' },
+    { en: 'Calling', es: 'Llamando a', fr: 'Appel de', pt: 'Ligando para' },
+    { en: 'now to book for', es: 'ahora para reservar para', fr: 'maintenant pour réserver pour', pt: 'agora para agendar para' },
+    { en: '. I\'ll confirm here.', es: '. Confirmaré aquí.', fr: '. Je confirmerai ici.', pt: '. Vou confirmar aqui.' },
+    { en: 'Based on', es: 'Basado en', fr: 'Basé sur', pt: 'Com base em' },
+    { en: 'I suggest', es: 'sugiero', fr: 'je suggère', pt: 'sugiro' },
+    { en: 'rating', es: 'calificación', fr: 'note', pt: 'avaliação' }
+  ];
+  
+  // Replace common phrases
+  for (const phrase of commonPhrases) {
+    const regex = new RegExp(phrase.en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    if (translations[lang][phrase.en]) {
+      translated = translated.replace(regex, translations[lang][phrase.en]);
+    } else if (phrase[lang]) {
+      translated = translated.replace(regex, phrase[lang]);
+    }
+  }
+  
+  // Try pattern matching for complex messages
   const patterns = [
-    { pattern: /^I found (\d+) clinic(s?) near you\. Here are the top options:$/, 
+    { 
+      pattern: /^I found (\d+) clinic(s?) near you\. Here are the top options:$/, 
       es: (m) => `Encontré ${m[1]} clínica${m[2] ? 's' : ''} cerca de usted. Aquí están las mejores opciones:`,
       fr: (m) => `J'ai trouvé ${m[1]} clinique${m[2] ? 's' : ''} près de vous. Voici les meilleures options :`,
       pt: (m) => `Encontrei ${m[1]} clínica${m[2] ? 's' : ''} perto de você. Aqui estão as melhores opções:`
     },
-    { pattern: /^\*\*Option (\d+): (.+)\*\*$/, 
+    { 
+      pattern: /^\*\*Option (\d+): (.+)\*\*$/, 
       es: (m) => `**Opción ${m[1]}: ${m[2]}**`,
       fr: (m) => `**Option ${m[1]} : ${m[2]}**`,
       pt: (m) => `**Opção ${m[1]}: ${m[2]}**`
     },
-    { pattern: /^Great! You selected \*\*Option (\d+): (.+)\*\*\.$/, 
+    { 
+      pattern: /^Great! You selected \*\*Option (\d+): (.+)\*\*\.$/, 
       es: (m) => `¡Excelente! Seleccionó **Opción ${m[1]}: ${m[2]}**.`,
       fr: (m) => `Excellent ! Vous avez sélectionné **Option ${m[1]} : ${m[2]}**.`,
       pt: (m) => `Ótimo! Você selecionou **Opção ${m[1]}: ${m[2]}**.`
     },
-    { pattern: /^Book for (.+)\? Reply \*\*YES\*\* to call now, or \*\*CANCEL\*\* to choose a different option\.$/, 
+    { 
+      pattern: /^Book for (.+)\? Reply \*\*YES\*\* to call now, or \*\*CANCEL\*\* to choose a different option\.$/, 
       es: (m) => `Reservar para ${m[1]}? Responda **SÍ** para llamar ahora, o **CANCELAR** para elegir una opción diferente.`,
       fr: (m) => `Réserver pour ${m[1]} ? Répondez **OUI** pour appeler maintenant, ou **ANNULER** pour choisir une autre option.`,
       pt: (m) => `Agendar para ${m[1]}? Responda **SIM** para ligar agora, ou **CANCELAR** para escolher uma opção diferente.`
     },
-    { pattern: /^Calling (.+) now to book for (.+)\. I'll confirm here\.$/, 
+    { 
+      pattern: /^Book for (.+)\? Reply YES to call now, or type NEXT to see another option\.$/, 
+      es: (m) => `Reservar para ${m[1]}? Responda SÍ para llamar ahora, o escriba SIGUIENTE para ver otra opción.`,
+      fr: (m) => `Réserver pour ${m[1]} ? Répondez OUI pour appeler maintenant, ou tapez SUIVANT pour voir une autre option.`,
+      pt: (m) => `Agendar para ${m[1]}? Responda SIM para ligar agora, ou digite PRÓXIMO para ver outra opção.`
+    },
+    { 
+      pattern: /^Calling (.+) now to book for (.+)\. I'll confirm here\.$/, 
       es: (m) => `Llamando a ${m[1]} ahora para reservar para ${m[2]}. Confirmaré aquí.`,
       fr: (m) => `Appel de ${m[1]} maintenant pour réserver pour ${m[2]}. Je confirmerai ici.`,
       pt: (m) => `Ligando para ${m[1]} agora para agendar para ${m[2]}. Vou confirmar aqui.`
     },
-    { pattern: /^Based on (.+), I suggest \*\*(.+)\*\*(.+)?\.$/, 
+    { 
+      pattern: /^Based on (.+), I suggest \*\*(.+)\*\*(.+)?\.$/, 
       es: (m) => `Basado en ${m[1]}, sugiero **${m[2]}**${m[3] || ''}.`,
       fr: (m) => `Basé sur ${m[1]}, je suggère **${m[2]}**${m[3] || ''}.`,
       pt: (m) => `Com base em ${m[1]}, sugiro **${m[2]}**${m[3] || ''}.`
+    },
+    {
+      pattern: /^Reply with the option number \((\d+)-(\d+)\) to select\.$/,
+      es: (m) => `Responda con el número de opción (${m[1]}-${m[2]}) para seleccionar.`,
+      fr: (m) => `Répondez avec le numéro d'option (${m[1]}-${m[2]}) pour sélectionner.`,
+      pt: (m) => `Responda com o número da opção (${m[1]}-${m[2]}) para selecionar.`
     }
   ];
   
@@ -271,8 +327,8 @@ function translateText(msg, lang) {
     }
   }
   
-  // If no translation found, return original
-  return msg;
+  // If translation was partially done, return it; otherwise return original
+  return translated !== msg ? translated : msg;
 }
 
 /* ---------- Translate to English for clinic calls (still needs API for user input) ---------- */
@@ -870,7 +926,8 @@ app.post('/chat/web', async (req, res) => {
             const clinic = remaining[i];
             const optionNum = shownCount + i + 1;
             const pros = [];
-            if (clinic.rating && clinic.rating >= 4.0) pros.push(`⭐ Rating: ${clinic.rating}/5`);
+            const ratingText = t('rating');
+            if (clinic.rating && clinic.rating >= 4.0) pros.push(`⭐ ${ratingText}: ${clinic.rating}/5`);
             if (clinic.address) pros.push(`📍 ${clinic.address}`);
             say(t(`**Option ${optionNum}: ${clinic.name}**${pros.length > 0 ? ` — ${pros.join(', ')}` : ''}`));
           }
