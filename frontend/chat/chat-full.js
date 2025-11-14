@@ -31,36 +31,45 @@ function formatClinicOptions(text) {
     part = part.trim();
     if (!part) continue;
     
-    // Check if this looks like a clinic option (starts with **Option)
-    if (/^\*\*Option \d+:/.test(part)) {
+    // Check if this looks like a clinic option (starts with **OPTION or **Option)
+    if (/^\*\*OPTION \d+:/i.test(part)) {
       // This is a clinic option - wrap it in a special container
       formatted += '<div class="clinic-option">';
       
       // Split into lines
       const lines = part.split('\n');
+      let nameCount = 0;
       for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
         if (!line) continue;
         
-        // Clinic name (bold)
-        if (/^\*\*Option \d+:/.test(line)) {
+        // Clinic name (bold) - first bold line
+        if (/^\*\*OPTION \d+:/i.test(line)) {
           line = line.replace(/\*\*(.*?)\*\*/g, '<h3 class="clinic-name">$1</h3>');
           formatted += line;
+          nameCount++;
         }
-        // Address (italic)
-        else if (/^\*.*\*$/.test(line)) {
-          line = line.replace(/\*(.*?)\*/g, '<p class="clinic-address">$1</p>');
+        // Specialty name (second bold line)
+        else if (/^\*\*[^*]+\*\*$/.test(line) && nameCount === 1) {
+          line = line.replace(/\*\*(.*?)\*\*/g, '<h3 class="clinic-name">$1</h3>');
           formatted += line;
+          nameCount++;
         }
-        // Bullet points (reasons)
-        else if (/^•/.test(line)) {
-          line = line.replace(/^•\s*/, '');
-          formatted += `<div class="clinic-reason">${line}</div>`;
+        // Address (regular text, not italic)
+        else if (line && !line.startsWith('**') && !line.startsWith('•') && i > 1) {
+          // Check if this looks like an address (contains street, city, state, zip pattern)
+          if (/\d+.*(street|st|avenue|ave|road|rd|drive|dr|boulevard|blvd|way|circle|ct|court|ln|lane)/i.test(line) || 
+              /[A-Z][a-z]+,?\s+[A-Z]{2}\s+\d{5}/.test(line)) {
+            formatted += `<p class="clinic-address">${line}</p>`;
+          } else {
+            // Regular detail line
+            formatted += `<div class="clinic-reason">${line}</div>`;
+          }
         }
-        // Regular text
-        else {
+        // Regular text details
+        else if (line && !line.startsWith('**')) {
           line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-          formatted += `<p>${line}</p>`;
+          formatted += `<div class="clinic-reason">${line}</div>`;
         }
       }
       
@@ -69,7 +78,6 @@ function formatClinicOptions(text) {
       // Regular message - just format markdown
       part = part.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
       part = part.replace(/\*(.*?)\*/g, '<em>$1</em>');
-      part = part.replace(/^•\s*(.+)$/gm, '<div class="clinic-reason">$1</div>');
       formatted += part.replace(/\n/g, '<br>');
     }
   }

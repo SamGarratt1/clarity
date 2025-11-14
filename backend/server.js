@@ -352,33 +352,38 @@ async function inferSpecialty(symptoms = '') {
       messages: [
         {
           role: 'system',
-          content: `You are a medical triage assistant. Based on the patient's symptoms, determine the most appropriate medical specialty. 
+          content: `You are an expert medical triage assistant. Analyze the patient's symptoms carefully and determine the most appropriate medical specialty. Think step by step about what type of doctor would best address these symptoms.
 
-Return ONLY one of these exact values (or "null" for general/primary care):
-- "psychiatrist" (mental health, depression, anxiety, therapy, counseling, psychological issues)
-- "dermatologist" (skin, rash, acne, moles, dermatology)
-- "dentist" (teeth, dental, oral health)
-- "ophthalmologist" (eyes, vision, eye care)
-- "otolaryngologist" (ear, nose, throat, ENT, hearing)
-- "cardiologist" (heart, cardiac, chest pain, cardiovascular)
-- "gastroenterologist" (stomach, GI, digestive, nausea, vomiting)
-- "urologist" (urinary, bladder, kidney, genitourinary, testicular pain)
-- "orthopedic" (bones, joints, fractures, orthopedic, back pain, spine)
-- "urgent care" (urgent, emergency, injury, cuts, burns, immediate care needed, walk-in)
-- "gynecologist" (women's health, gynecology, OBGYN, pregnancy, reproductive)
-- "pediatrician" (children, pediatric, babies, kids)
-- "null" (general checkup, primary care, no specific specialty needed)
+IMPORTANT RULES:
+1. Mental/psychological symptoms → psychiatrist (depression, anxiety, sadness, mental health, therapy, counseling, bipolar, PTSD, trauma, panic attacks, OCD, suicidal thoughts, mood disorders)
+2. Skin issues → dermatologist (rash, acne, moles, skin problems, eczema, psoriasis, warts, dermatitis, skin cancer concerns)
+3. Teeth/oral → dentist (tooth pain, dental, gum problems, oral health, root canal, extraction, braces)
+4. Eyes/vision → ophthalmologist (eye problems, vision issues, eye pain, glasses, contacts, eye exam, cataracts, glaucoma)
+5. Ear/nose/throat → otolaryngologist (ear pain, hearing, nose problems, throat pain, sinus, ENT issues, sore throat, hoarseness)
+6. Heart/cardiovascular → cardiologist (chest pain, heart problems, cardiac issues, shortness of breath, palpitations, hypertension, blood pressure)
+7. Stomach/digestive → gastroenterologist (stomach pain, nausea, vomiting, diarrhea, digestive issues, GI problems, acid reflux, IBS, ulcers)
+8. Urinary/genital (male) → urologist (urinary problems, bladder issues, kidney problems, testicular pain, "balls hurt", genitourinary issues)
+9. Bones/joints → orthopedic (bone pain, joint pain, fractures, back pain, spine issues, knee, hip, shoulder, arthritis, broken bones)
+10. Urgent/emergency → urgent care (urgent needs, injuries, cuts, burns, immediate care, emergency, walk-in needed)
+11. Women's health → gynecologist (women's health, gynecology, OBGYN, pregnancy, prenatal, menstrual issues, pap smear, mammogram)
+12. Children → pediatrician (child health, pediatric, babies, kids, toddler health issues)
+13. General/vague → null (general checkup, routine visit, no specific symptoms, unclear issues)
 
-Be intelligent: "my balls hurt" = urologist, "mental issues" = psychiatrist, "I'm sad" = psychiatrist, vague symptoms = null.`
+Return ONLY the exact specialty name or "null". Be precise and consider the primary complaint.`
         },
         {
           role: 'user',
-          content: `Symptoms: "${s}"`
+          content: `Patient symptoms: "${s}"
+
+What specialty should treat this? Return only the specialty name or "null".`
         }
       ]
     });
     
     const result = (resp.choices?.[0]?.message?.content || '').trim().toLowerCase();
+    
+    // Clean up the result - remove any extra text
+    const cleaned = result.replace(/[^a-z\s]/g, '').trim();
     
     // Validate the result is one of our specialties
     const validSpecialties = [
@@ -387,18 +392,58 @@ Be intelligent: "my balls hurt" = urologist, "mental issues" = psychiatrist, "I'
       'orthopedic', 'urgent care', 'gynecologist', 'pediatrician', 'null'
     ];
     
-    if (validSpecialties.includes(result)) {
-      return result === 'null' ? null : result;
+    // Check if cleaned result matches any valid specialty
+    const matched = validSpecialties.find(spec => cleaned.includes(spec) || spec.includes(cleaned));
+    
+    if (matched) {
+      return matched === 'null' ? null : matched;
     }
     
     // Fallback to null if AI returns something unexpected
-    console.warn(`AI returned unexpected specialty: "${result}" for symptoms: "${s}"`);
+    console.warn(`AI returned unexpected specialty: "${result}" (cleaned: "${cleaned}") for symptoms: "${s}"`);
     return null;
   } catch (e) {
     console.error('Error inferring specialty:', e.message);
     // Fallback to null on error
     return null;
   }
+}
+
+// Estimate cost for a clinic visit based on specialty and location
+function estimateCost(specialty, zip) {
+  // Base costs by specialty (average out-of-pocket costs in USD)
+  const baseCosts = {
+    'psychiatrist': { min: 100, max: 300, avg: 200 },
+    'dermatologist': { min: 150, max: 400, avg: 250 },
+    'dentist': { min: 100, max: 500, avg: 200 },
+    'ophthalmologist': { min: 150, max: 400, avg: 250 },
+    'otolaryngologist': { min: 150, max: 400, avg: 250 },
+    'cardiologist': { min: 200, max: 500, avg: 350 },
+    'gastroenterologist': { min: 200, max: 500, avg: 350 },
+    'urologist': { min: 200, max: 500, avg: 350 },
+    'orthopedic': { min: 200, max: 500, avg: 350 },
+    'urgent care': { min: 100, max: 300, avg: 200 },
+    'gynecologist': { min: 150, max: 400, avg: 250 },
+    'pediatrician': { min: 100, max: 300, avg: 200 },
+    'null': { min: 100, max: 250, avg: 150 } // General practice
+  };
+  
+  const cost = baseCosts[specialty] || baseCosts['null'];
+  
+  // Adjust based on ZIP code (simplified - in reality would use cost of living data)
+  // High-cost areas (e.g., NYC, SF) have higher costs
+  const highCostZips = ['100', '101', '102', '941', '90210', '90024', '021', '200', '303', '787'];
+  const isHighCost = highCostZips.some(prefix => zip && zip.startsWith(prefix));
+  
+  if (isHighCost) {
+    return {
+      min: Math.round(cost.min * 1.3),
+      max: Math.round(cost.max * 1.3),
+      avg: Math.round(cost.avg * 1.3)
+    };
+  }
+  
+  return cost;
 }
 
 async function findClinics(zip, specialty = null, symptoms = '') {
@@ -945,7 +990,7 @@ app.post('/chat', async (req, res) => {
         const best = clinics[0];
         s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
 
-        const reasons = [];
+        const details = [];
         
         // Get specialty display name
         const specialtyNames = {
@@ -967,19 +1012,34 @@ app.post('/chat', async (req, res) => {
           : 'General Practice';
         
         if (best.isSpecialty && best.specialty) {
-          reasons.push(`🏥 Specializes in ${specialtyName}`);
+          details.push(`Specializes in ${specialtyName}`);
         }
-        if (best.rating && best.rating >= 4.5) reasons.push(`⭐ Excellent rating (${best.rating}/5)`);
-        else if (best.rating && best.rating >= 4.0) reasons.push(`⭐ Good rating (${best.rating}/5)`);
-        else if (best.rating && best.rating >= 3.5) reasons.push(`⭐ Rated ${best.rating}/5`);
-        if (!best.isSpecialty) reasons.push('📍 Closest to your location');
+        if (best.rating && best.rating >= 4.5) {
+          details.push(`Rating: ${best.rating}/5.0 (Excellent)`);
+        } else if (best.rating && best.rating >= 4.0) {
+          details.push(`Rating: ${best.rating}/5.0 (Good)`);
+        } else if (best.rating && best.rating >= 3.5) {
+          details.push(`Rating: ${best.rating}/5.0`);
+        }
+        if (!best.isSpecialty) {
+          details.push('Closest to your location');
+        }
+        
+        // Add cost estimate if no insurance
+        if (!s.insuranceY && specialty) {
+          const cost = estimateCost(specialty, s.zip);
+          details.push(`Estimated cost: $${cost.min}-$${cost.max} (avg: $${cost.avg})`);
+        }
 
-        say(t(`**${best.name} — ${specialtyName}**`));
+        say(t(`**${best.name}**`));
+        say(t(`**${specialtyName}**`));
         if (best.address) {
-          say(t(`*${best.address}*`));
+          say(t(`${best.address}`));
         }
-        if (reasons.length > 0) {
-          say(t(`• ${reasons.join('\n• ')}`));
+        if (details.length > 0) {
+          details.forEach(detail => {
+            say(t(`${detail}`));
+          });
         }
         say(t(`Book for ${s.windowText}? Reply YES to call now, or type NEXT to see another option.`));
         s.state = 'confirm_choice';
