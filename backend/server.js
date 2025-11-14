@@ -539,7 +539,13 @@ app.post('/chat/web', async (req, res) => {
       }
       return translated;
     } catch (e) {
-      console.error(`[TRANSLATE] Error for ${langName}:`, e.message, e.stack);
+      console.error(`[TRANSLATE] Error for ${langName}:`, e.message);
+      // If quota exceeded, return a helpful message in the target language
+      if (e.message && e.message.includes('429') && e.message.includes('quota')) {
+        console.error(`[TRANSLATE] OpenAI quota exceeded. Translation disabled.`);
+        // Return English with a note that translation is unavailable
+        return msg + `\n\n[Note: Translation service temporarily unavailable due to API quota limit. Please check OpenAI billing.]`;
+      }
       return msg; // Return original on error
     }
   }
