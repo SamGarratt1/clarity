@@ -1346,23 +1346,36 @@ app.post('/chat/web', async (req, res) => {
             if (clinic.isSpecialty && clinic.specialty) {
               reasons.push(`🏥 Specializes in ${specialtyName}`);
             }
-            if (i === 0 && !clinic.isSpecialty) reasons.push('📍 Closest to your location');
-            if (clinic.rating && clinic.rating >= 4.5) reasons.push(`⭐ Excellent rating (${clinic.rating}/5)`);
-            else if (clinic.rating && clinic.rating >= 4.0) reasons.push(`⭐ Good rating (${clinic.rating}/5)`);
-            else if (clinic.rating && clinic.rating >= 3.5) reasons.push(`⭐ Rated ${clinic.rating}/5`);
-
-            const clinicNum = i + 1;
-            // Clinic name with specialty in big bold
-            say(t(`**Option ${clinicNum}: ${clinic.name} — ${specialtyName}**`));
-            
-            // Address as subheading
-            if (clinic.address) {
-              say(t(`*${clinic.address}*`));
+            if (i === 0 && !clinic.isSpecialty) details.push('Closest to your location');
+            if (clinic.rating && clinic.rating >= 4.5) {
+              details.push(`Rating: ${clinic.rating}/5.0 (Excellent)`);
+            } else if (clinic.rating && clinic.rating >= 4.0) {
+              details.push(`Rating: ${clinic.rating}/5.0 (Good)`);
+            } else if (clinic.rating && clinic.rating >= 3.5) {
+              details.push(`Rating: ${clinic.rating}/5.0`);
             }
             
-            // Reasons why it's a top selection
-            if (reasons.length > 0) {
-              say(t(`• ${reasons.join('\n• ')}`));
+            // Add cost estimate if no insurance
+            if (!s.insuranceY && specialty) {
+              const cost = estimateCost(specialty, s.zip);
+              details.push(`Estimated cost: $${cost.min}-$${cost.max} (avg: $${cost.avg})`);
+            }
+
+            const clinicNum = i + 1;
+            // Clinic name - larger heading
+            say(t(`**OPTION ${clinicNum}: ${clinic.name}**`));
+            say(t(`**${specialtyName}**`));
+            
+            // Address
+            if (clinic.address) {
+              say(t(`${clinic.address}`));
+            }
+            
+            // Details list
+            if (details.length > 0) {
+              details.forEach(detail => {
+                say(t(`${detail}`));
+              });
             }
             
             say(t('')); // Empty line between options
