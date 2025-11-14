@@ -119,8 +119,16 @@ async function sendToAssistant(text) {
 
     if (!res.ok) {
       const errorText = await res.text();
-      console.error("Server error:", errorText);
-      addMessage("assistant", `Sorry, I encountered an error: ${res.status}. Please try again.`);
+      console.error("Server error:", res.status, errorText);
+      let errorMsg = `Sorry, I encountered an error (${res.status}). `;
+      if (res.status === 404) {
+        errorMsg += "The server endpoint was not found. Please check if the backend is running.";
+      } else if (res.status === 500) {
+        errorMsg += "The server encountered an internal error.";
+      } else {
+        errorMsg += "Please try again.";
+      }
+      addMessage("assistant", errorMsg);
       return;
     }
 
@@ -133,7 +141,13 @@ async function sendToAssistant(text) {
   } catch (err) {
     hideLoading();
     console.error("Network error:", err);
-    addMessage("assistant", "I'm having trouble connecting to the server. Please check your connection and try again.");
+    let errorMsg = "I'm having trouble connecting to the server. ";
+    if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
+      errorMsg += `The backend at ${API_URL} might be down or unreachable. Please check your connection.`;
+    } else {
+      errorMsg += `Error: ${err.message}. Please try again.`;
+    }
+    addMessage("assistant", errorMsg);
   }
 }
 
