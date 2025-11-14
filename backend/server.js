@@ -769,21 +769,26 @@ app.post('/chat', async (req, res) => {
       s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
 
       const reasons = [];
+      
+      // Get specialty display name
+      const specialtyNames = {
+        'dermatologist': 'Dermatology',
+        'dentist': 'Dental',
+        'ophthalmologist': 'Eye Care',
+        'otolaryngologist': 'ENT',
+        'cardiologist': 'Cardiology',
+        'gastroenterologist': 'Gastroenterology',
+        'orthopedic': 'Orthopedics',
+        'urgent care': 'Urgent Care',
+        'psychiatrist': 'Mental Health',
+        'gynecologist': 'Women\'s Health',
+        'pediatrician': 'Pediatrics'
+      };
+      const specialtyName = best.isSpecialty && best.specialty 
+        ? specialtyNames[best.specialty] || best.specialty 
+        : 'General Practice';
+      
       if (best.isSpecialty && best.specialty) {
-        const specialtyNames = {
-          'dermatologist': 'Dermatology',
-          'dentist': 'Dental',
-          'ophthalmologist': 'Eye Care',
-          'otolaryngologist': 'ENT',
-          'cardiologist': 'Cardiology',
-          'gastroenterologist': 'Gastroenterology',
-          'orthopedic': 'Orthopedics',
-          'urgent care': 'Urgent Care',
-          'psychiatrist': 'Mental Health',
-          'gynecologist': 'Women\'s Health',
-          'pediatrician': 'Pediatrics'
-        };
-        const specialtyName = specialtyNames[best.specialty] || best.specialty;
         reasons.push(`🏥 Specializes in ${specialtyName}`);
       }
       if (best.rating && best.rating >= 4.5) reasons.push(`⭐ Excellent rating (${best.rating}/5)`);
@@ -791,7 +796,7 @@ app.post('/chat', async (req, res) => {
       else if (best.rating && best.rating >= 3.5) reasons.push(`⭐ Rated ${best.rating}/5`);
       if (!best.isSpecialty) reasons.push('📍 Closest to your location');
 
-      say(t(`**${best.name}**`));
+      say(t(`**${best.name} — ${specialtyName}**`));
       if (best.address) {
         say(t(`*${best.address}*`));
       }
