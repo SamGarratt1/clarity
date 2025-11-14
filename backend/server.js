@@ -917,7 +917,7 @@ app.post('/chat', async (req, res) => {
 
   if (s.state === 'find') {
     // Fetch clinics (own clinic UX can be added later via saved preferences)
-    const specialty = inferSpecialty(s.symptoms);
+    const specialty = await inferSpecialty(s.symptoms);
     const clinics = await findClinics(s.zip, specialty, s.symptoms);
     s.clinics = clinics;
 
@@ -925,47 +925,65 @@ app.post('/chat', async (req, res) => {
       say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
       s.state = 'zip';
     } else {
-      // pick the best candidate and explain
-      const best = clinics[0];
-      s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
-
-      const reasons = [];
+      // Check if this is urgent care - handle differently (no appointments)
+      const isUrgentCare = clinics[0]?.isUrgentCare || specialty === 'urgent care';
       
-      // Get specialty display name
-      const specialtyNames = {
-        'dermatologist': 'Dermatology',
-        'dentist': 'Dental',
-        'ophthalmologist': 'Eye Care',
-        'otolaryngologist': 'ENT',
-        'cardiologist': 'Cardiology',
-        'gastroenterologist': 'Gastroenterology',
-        'orthopedic': 'Orthopedics',
-        'urgent care': 'Urgent Care',
-        'psychiatrist': 'Mental Health',
-        'gynecologist': 'Women\'s Health',
-        'pediatrician': 'Pediatrics'
-      };
-      const specialtyName = best.isSpecialty && best.specialty 
-        ? specialtyNames[best.specialty] || best.specialty 
-        : 'General Practice';
-      
-      if (best.isSpecialty && best.specialty) {
-        reasons.push(`🏥 Specializes in ${specialtyName}`);
-      }
-      if (best.rating && best.rating >= 4.5) reasons.push(`⭐ Excellent rating (${best.rating}/5)`);
-      else if (best.rating && best.rating >= 4.0) reasons.push(`⭐ Good rating (${best.rating}/5)`);
-      else if (best.rating && best.rating >= 3.5) reasons.push(`⭐ Rated ${best.rating}/5`);
-      if (!best.isSpecialty) reasons.push('📍 Closest to your location');
+      if (isUrgentCare) {
+        // Urgent care doesn't take appointments
+        const best = clinics[0];
+        say(t(`**${best.name}**`));
+        if (best.address) {
+          say(t(`*${best.address}*`));
+        }
+        if (best.openingHours && best.openingHours.length > 0) {
+          say(t(`Hours: ${best.openingHours[0]}`));
+        }
+        say(t(`📍 Walk-in anytime - no appointment needed for urgent care.`));
+        s.state = 'completed';
+      } else {
+        // Regular clinic - proceed with appointment booking
+        const best = clinics[0];
+        s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
 
-      say(t(`**${best.name} — ${specialtyName}**`));
-      if (best.address) {
-        say(t(`*${best.address}*`));
+        const reasons = [];
+        
+        // Get specialty display name
+        const specialtyNames = {
+          'dermatologist': 'Dermatology',
+          'dentist': 'Dental',
+          'ophthalmologist': 'Eye Care',
+          'otolaryngologist': 'ENT',
+          'cardiologist': 'Cardiology',
+          'gastroenterologist': 'Gastroenterology',
+          'orthopedic': 'Orthopedics',
+          'urgent care': 'Urgent Care',
+          'psychiatrist': 'Mental Health',
+          'gynecologist': 'Women\'s Health',
+          'pediatrician': 'Pediatrics',
+          'urologist': 'Urology'
+        };
+        const specialtyName = best.isSpecialty && best.specialty 
+          ? specialtyNames[best.specialty] || best.specialty 
+          : 'General Practice';
+        
+        if (best.isSpecialty && best.specialty) {
+          reasons.push(`🏥 Specializes in ${specialtyName}`);
+        }
+        if (best.rating && best.rating >= 4.5) reasons.push(`⭐ Excellent rating (${best.rating}/5)`);
+        else if (best.rating && best.rating >= 4.0) reasons.push(`⭐ Good rating (${best.rating}/5)`);
+        else if (best.rating && best.rating >= 3.5) reasons.push(`⭐ Rated ${best.rating}/5`);
+        if (!best.isSpecialty) reasons.push('📍 Closest to your location');
+
+        say(t(`**${best.name} — ${specialtyName}**`));
+        if (best.address) {
+          say(t(`*${best.address}*`));
+        }
+        if (reasons.length > 0) {
+          say(t(`• ${reasons.join('\n• ')}`));
+        }
+        say(t(`Book for ${s.windowText}? Reply YES to call now, or type NEXT to see another option.`));
+        s.state = 'confirm_choice';
       }
-      if (reasons.length > 0) {
-        say(t(`• ${reasons.join('\n• ')}`));
-      }
-      say(t(`Book for ${s.windowText}? Reply YES to call now, or type NEXT to see another option.`));
-      s.state = 'confirm_choice';
     }
   }
   else if (s.state === 'confirm_choice') {
