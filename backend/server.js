@@ -544,12 +544,12 @@ app.post('/chat', async (req, res) => {
   else if (s.state === 'name') {
     s.patientName = text.trim();
     s.state = 'symptoms';
-    say(await t('What is the reason for the visit? (brief)'));
+    say(t('What is the reason for the visit? (brief)'));
   }
   else if (s.state === 'symptoms') {
     s.symptoms = text.trim();
     s.state = 'zip';
-    say(await t('What ZIP code should I search near? (5 digits)'));
+    say(t('What ZIP code should I search near? (5 digits)'));
   }
   else if (s.state === 'zip') {
     if (!isValidZip(text)) { say(await t('Please enter a 5-digit ZIP (e.g., 30309).')); }
@@ -562,7 +562,7 @@ app.post('/chat', async (req, res) => {
   else if (s.state === 'clinic_pref') {
     s.useOwnClinic = /my clinic/i.test(text);
     s.state = 'date';
-    say(await t('What date works best? (MM/DD/YYYY). You can also say "ASAP".'));
+    say(t('What date works best? (MM/DD/YYYY). You can also say "ASAP".'));
   }
   else if (s.state === 'date') {
     if (looksLikeASAP(text)) {
