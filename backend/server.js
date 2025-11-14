@@ -679,7 +679,16 @@ app.post('/chat', async (req, res) => {
       if (!nxt) { say(t('No more options. Type YES to proceed or RESET to start again.')); }
       else {
         s.chosenClinic = { name: nxt.name, phone: nxt.phone, address: nxt.address, rating: nxt.rating };
-        say(t(`Option: **${nxt.name}**${nxt.address?` — ${nxt.address}`:''}${nxt.rating?` (rating ${nxt.rating}/5)`:''}.`));
+        const reasons = [];
+        if (nxt.rating && nxt.rating >= 4.0) reasons.push(`⭐ ${t('rating')}: ${nxt.rating}/5`);
+        
+        say(t(`**${nxt.name}**`));
+        if (nxt.address) {
+          say(t(`*${nxt.address}*`));
+        }
+        if (reasons.length > 0) {
+          say(t(`• ${reasons.join('\n• ')}`));
+        }
         say(t(`Book for ${s.windowText}? Reply YES to call, or NEXT for another.`));
       }
       } else if (/^yes\b/i.test(text)) {
@@ -877,10 +886,10 @@ app.post('/chat/web', async (req, res) => {
       s.clinics = clinics;
 
       if (!clinics.length) {
-        say(t(`I couldn't find clinics nearby. Please check the ZIP or try a broader area.`));
+        say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
         s.state = 'zip';
       } else {
-        // Show top 3 clinics with pros/cons
+        // Show top 3 clinics with improved formatting
         const topClinics = clinics.slice(0, 3);
         s.chosenClinic = { name: topClinics[0].name, phone: topClinics[0].phone, address: topClinics[0].address, rating: topClinics[0].rating };
 
@@ -889,27 +898,26 @@ app.post('/chat/web', async (req, res) => {
 
         for (let i = 0; i < topClinics.length; i++) {
           const clinic = topClinics[i];
-          const pros = [];
-          const cons = [];
+          const reasons = [];
 
-          // Pros
-          if (clinic.rating && clinic.rating >= 4.5) pros.push(`⭐ High rating (${clinic.rating}/5)`);
-          else if (clinic.rating && clinic.rating >= 4.0) pros.push(`⭐ Good rating (${clinic.rating}/5)`);
-          if (i === 0) pros.push('📍 Closest option');
-          if (clinic.address) pros.push(`📍 ${clinic.address}`);
-
-          // Cons
-          if (clinic.rating && clinic.rating < 4.0) cons.push(`⚠️ Lower rating (${clinic.rating}/5)`);
-          if (!clinic.phone) cons.push('⚠️ Phone number not available');
+          // Build reasons why this is a top selection
+          if (i === 0) reasons.push('📍 Closest to your location');
+          if (clinic.rating && clinic.rating >= 4.5) reasons.push(`⭐ Excellent rating (${clinic.rating}/5)`);
+          else if (clinic.rating && clinic.rating >= 4.0) reasons.push(`⭐ Good rating (${clinic.rating}/5)`);
+          else if (clinic.rating && clinic.rating >= 3.5) reasons.push(`⭐ Rated ${clinic.rating}/5`);
 
           const clinicNum = i + 1;
+          // Clinic name in big bold
           say(t(`**Option ${clinicNum}: ${clinic.name}**`));
           
-          if (pros.length > 0) {
-            say(t(`✅ Pros: ${pros.join(', ')}`));
+          // Address as subheading
+          if (clinic.address) {
+            say(t(`*${clinic.address}*`));
           }
-          if (cons.length > 0) {
-            say(t(`❌ Cons: ${cons.join(', ')}`));
+          
+          // Reasons why it's a top selection
+          if (reasons.length > 0) {
+            say(t(`• ${reasons.join('\n• ')}`));
           }
           
           say(t('')); // Empty line between options
@@ -947,11 +955,17 @@ app.post('/chat/web', async (req, res) => {
           for (let i = 0; i < Math.min(3, remaining.length); i++) {
             const clinic = remaining[i];
             const optionNum = shownCount + i + 1;
-            const pros = [];
-            const ratingText = t('rating');
-            if (clinic.rating && clinic.rating >= 4.0) pros.push(`⭐ ${ratingText}: ${clinic.rating}/5`);
-            if (clinic.address) pros.push(`📍 ${clinic.address}`);
-            say(t(`**Option ${optionNum}: ${clinic.name}**${pros.length > 0 ? ` — ${pros.join(', ')}` : ''}`));
+            const reasons = [];
+            if (clinic.rating && clinic.rating >= 4.0) reasons.push(`⭐ ${t('rating')}: ${clinic.rating}/5`);
+            
+            say(t(`**Option ${optionNum}: ${clinic.name}**`));
+            if (clinic.address) {
+              say(t(`*${clinic.address}*`));
+            }
+            if (reasons.length > 0) {
+              say(t(`• ${reasons.join('\n• ')}`));
+            }
+            say(t('')); // Empty line between options
           }
           say(t(`Reply with the option number (${shownCount + 1}-${shownCount + Math.min(3, remaining.length)}) to select.`));
         }
