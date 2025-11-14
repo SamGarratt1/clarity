@@ -420,10 +420,14 @@ app.post('/chat', async (req, res) => {
         say(await t(`Option: **${nxt.name}**${nxt.address?` — ${nxt.address}`:''}${nxt.rating?` (rating ${nxt.rating}/5)`:''}.`));
         say(await t(`Book for ${s.windowText}? Reply YES to call, or NEXT for another.`));
       }
-    } else if (/^yes\b/i.test(text)) {
-      if (!s?.chosenClinic?.phone) {
-        say(await t('This clinic did not list a phone number via Maps. Reply NEXT for another option.'));
-      } else {
+      } else if (/^yes\b/i.test(text)) {
+        if (s.state !== 'final_confirm') {
+          // If they said YES but haven't selected an option yet, show options again
+          say(await t('Please select an option first. Reply **1**, **2**, or **3** to choose a clinic.'));
+        } else if (!s?.chosenClinic?.phone) {
+          say(await t('This clinic did not list a phone number via Maps. Please select a different option (1, 2, or 3).'));
+          s.state = 'confirm_choice';
+        } else {
         // translate name/reason to English for the call
         const nameEn   = await translateToEnglish(s.patientName, s.lang || 'auto');
         const reasonEn = await translateToEnglish(s.symptoms,   s.lang || 'auto');
@@ -588,30 +592,81 @@ app.post('/chat/web', async (req, res) => {
         say(await t(`I couldn't find clinics nearby. Please check the ZIP or try a broader area.`));
         s.state = 'zip';
       } else {
-        const best = clinics[0];
-        s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
+        // Show top 3 clinics with pros/cons
+        const topClinics = clinics.slice(0, 3);
+        s.chosenClinic = { name: topClinics[0].name, phone: topClinics[0].phone, address: topClinics[0].address, rating: topClinics[0].rating };
 
-        const reason =
-          s.useOwnClinic ? 'your usual clinic preference'
-          : (specialty !== 'clinic' ? `your symptoms indicating ${specialty}` : 'distance and availability');
+        say(await t(`I found ${clinics.length} clinic${clinics.length > 1 ? 's' : ''} near you. Here are the top options:`));
+        say(await t('')); // Empty line for spacing
 
-        say(await t(`Based on ${reason}, I suggest **${best.name}**${best.address?` — ${best.address}`:''}${best.rating?` (rating ${best.rating}/5)`:''}.`));
-        say(await t(`Book for ${s.windowText}? Reply YES to call now, or type NEXT to see another option.`));
+        for (let i = 0; i < topClinics.length; i++) {
+          const clinic = topClinics[i];
+          const pros = [];
+          const cons = [];
+
+          // Pros
+          if (clinic.rating && clinic.rating >= 4.5) pros.push(`⭐ High rating (${clinic.rating}/5)`);
+          else if (clinic.rating && clinic.rating >= 4.0) pros.push(`⭐ Good rating (${clinic.rating}/5)`);
+          if (i === 0) pros.push('📍 Closest option');
+          if (clinic.address) pros.push(`📍 ${clinic.address}`);
+
+          // Cons
+          if (clinic.rating && clinic.rating < 4.0) cons.push(`⚠️ Lower rating (${clinic.rating}/5)`);
+          if (!clinic.phone) cons.push('⚠️ Phone number not available');
+
+          const clinicNum = i + 1;
+          say(await t(`**Option ${clinicNum}: ${clinic.name}**`));
+          
+          if (pros.length > 0) {
+            say(await t(`✅ Pros: ${pros.join(', ')}`));
+          }
+          if (cons.length > 0) {
+            say(await t(`❌ Cons: ${cons.join(', ')}`));
+          }
+          
+          say(await t('')); // Empty line between options
+        }
+
+        say(await t(`Which option would you like? Reply **1**, **2**, or **3** to select, or type **NEXT** to see more options.`));
         s.state = 'confirm_choice';
       }
     }
     else if (s.state === 'confirm_choice') {
-      if (/^next\b/i.test(text)) {
-        const list = s.clinics || [];
-        const idx = list.findIndex(c => c.name === s.chosenClinic?.name);
-        const nxt = list[idx + 1];
-        if (!nxt) { say(await t('No more options. Type YES to proceed or RESET to start again.')); }
-        else {
-          s.chosenClinic = { name: nxt.name, phone: nxt.phone, address: nxt.address, rating: nxt.rating };
-          say(await t(`Option: **${nxt.name}**${nxt.address?` — ${nxt.address}`:''}${nxt.rating?` (rating ${nxt.rating}/5)`:''}.`));
-          say(await t(`Book for ${s.windowText}? Reply YES to call, or NEXT for another.`));
+      // Handle numeric selection (1, 2, 3)
+      const numMatch = text.trim().match(/^(\d+)$/);
+      if (numMatch) {
+        const selectedNum = parseInt(numMatch[1]);
+        const topClinics = (s.clinics || []).slice(0, 3);
+        if (selectedNum >= 1 && selectedNum <= topClinics.length) {
+          const selected = topClinics[selectedNum - 1];
+          s.chosenClinic = { name: selected.name, phone: selected.phone, address: selected.address, rating: selected.rating };
+          say(await t(`Great! You selected **Option ${selectedNum}: ${selected.name}**.`));
+          say(await t(`Book for ${s.windowText}? Reply **YES** to call now, or **CANCEL** to choose a different option.`));
+          s.state = 'final_confirm';
+        } else {
+          say(await t(`Please select option 1, 2, or 3.`));
         }
-      } else if (/^yes\b/i.test(text)) {
+      }
+      else if (/^next\b/i.test(text)) {
+        const list = s.clinics || [];
+        const shownCount = Math.min(3, list.length);
+        const remaining = list.slice(shownCount);
+        if (remaining.length === 0) { 
+          say(await t('No more options. Please select from options 1, 2, or 3, or type RESET to start again.')); 
+        } else {
+          say(await t(`Here are more options:`));
+          say(await t(''));
+          for (let i = 0; i < Math.min(3, remaining.length); i++) {
+            const clinic = remaining[i];
+            const optionNum = shownCount + i + 1;
+            const pros = [];
+            if (clinic.rating && clinic.rating >= 4.0) pros.push(`⭐ Rating: ${clinic.rating}/5`);
+            if (clinic.address) pros.push(`📍 ${clinic.address}`);
+            say(await t(`**Option ${optionNum}: ${clinic.name}**${pros.length > 0 ? ` — ${pros.join(', ')}` : ''}`));
+          }
+          say(await t(`Reply with the option number (${shownCount + 1}-${shownCount + Math.min(3, remaining.length)}) to select.`));
+        }
+      } else if (/^yes\b/i.test(text) && s.state === 'final_confirm') {
         if (!s?.chosenClinic?.phone) {
           say(await t('This clinic did not list a phone number via Maps. Reply NEXT for another option.'));
         } else {
@@ -630,10 +685,17 @@ app.post('/chat/web', async (req, res) => {
           s.state = 'calling';
           say(await t(`Calling ${s.chosenClinic.name} now to book for ${s.windowText}. I'll confirm here.`));
         }
+      } else if (/^cancel\b/i.test(text) && s.state === 'final_confirm') {
+        s.state = 'confirm_choice';
+        say(await t('Cancelled. Please select option **1**, **2**, or **3** to choose a clinic.'));
       } else if (/^reset|restart|new$/i.test(text)) {
         s = { state:'start', lang:s.lang }; say(await t('Reset. Type NEW to begin.'));
       } else {
-        say(await t('Please reply YES to book, NEXT for another option, or RESET to start over.'));
+        if (s.state === 'final_confirm') {
+          say(await t('Please reply **YES** to book, **CANCEL** to choose a different option, or **RESET** to start over.'));
+        } else {
+          say(await t('Please reply with option number (**1**, **2**, or **3**) to select, **NEXT** for more options, or **RESET** to start over.'));
+        }
       }
     }
   }
