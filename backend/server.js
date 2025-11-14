@@ -451,6 +451,190 @@ app.post('/chat', async (req, res) => {
   return res.json({ ok:true, lines: LINES });
 });
 
+/* ---------- Web chat endpoint (for web UI) ---------- */
+/**
+ * Body: { message: string, source: string, lang?: 'en'|'es'|'pt'|'fr' }
+ * Returns: { reply: string }
+ */
+app.post('/chat/web', async (req, res) => {
+  const { message, source, lang, sessionId } = req.body || {};
+  if (!message) return res.status(400).json({ error: 'message required' });
+
+  // Use sessionId from client if provided, otherwise use IP-based session
+  // This allows better session persistence across page refreshes
+  const from = sessionId ? `web-${sessionId}` : `web-${req.ip || req.headers['x-forwarded-for'] || 'default'}`;
+  const text = message.trim();
+
+  // Reuse the same chat logic
+  let s = smsSessions.get(from) || {
+    state: 'start',
+    lang: lang || 'en',
+    patientName: '',
+    symptoms: '',
+    zip: '',
+    insuranceY: false,
+    dateStr: '',
+    timeStr: '',
+    windowText: '',
+    useOwnClinic: false,
+    clinics: [],
+    chosenClinic: null,
+    callback: ''
+  };
+
+  if (lang) s.lang = lang;
+
+  const LINES = [];
+  const say = (m) => LINES.push(m);
+
+  async function t(msg) {
+    if ((s.lang||'en') === 'en') return msg;
+    try {
+      const r = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        temperature: 0,
+        messages: [
+          { role:'system', content:`Translate to ${s.lang}. Return only the translation.` },
+          { role:'user', content: msg }
+        ]
+      });
+      return (r.choices?.[0]?.message?.content || msg).trim();
+    } catch { return msg; }
+  }
+
+  function looksLikeASAP(str){ return /\b(asap|as soon as possible|soonest|earliest)\b/i.test(str||''); }
+
+  // Handle quick actions
+  if (/^use my usual clinic/i.test(text)) {
+    s.useOwnClinic = true;
+    if (s.state === 'clinic_pref') {
+      s.state = 'date';
+      say(await t('What date works best? (MM/DD/YYYY). You can also say "ASAP".'));
+    } else {
+      say(await t('Noted. I\'ll use your usual clinic when we get to that step.'));
+    }
+  } else if (/^show nearby clinics|nearby/i.test(text)) {
+    s.useOwnClinic = false;
+    if (s.state === 'clinic_pref') {
+      s.state = 'date';
+      say(await t('What date works best? (MM/DD/YYYY). You can also say "ASAP".'));
+    } else {
+      say(await t('Noted. I\'ll search for nearby clinics when we get to that step.'));
+    }
+  } else {
+    // state machine (same as /chat)
+    if (s.state === 'start' || /^new$/i.test(text)) {
+      s.state = 'name';
+      say(await t(`Welcome to ${BRAND_NAME} — ${BRAND_SLOGAN}. What is the patient's full name? (First Last)`));
+    }
+    else if (s.state === 'name') {
+      s.patientName = text.trim();
+      s.state = 'symptoms';
+      say(await t('What is the reason for the visit? (brief)'));
+    }
+    else if (s.state === 'symptoms') {
+      s.symptoms = text.trim();
+      s.state = 'zip';
+      say(await t('What ZIP code should I search near? (5 digits)'));
+    }
+    else if (s.state === 'zip') {
+      if (!isValidZip(text)) { say(await t('Please enter a 5-digit ZIP (e.g., 30309).')); }
+      else { s.zip = text.trim(); s.state = 'ins'; say(await t('Do you have insurance? (Y/N)')); }
+    }
+    else if (s.state === 'ins') {
+      if (!ynRe.test(text)) { say(await t('Please reply Y or N for insurance.')); }
+      else { s.insuranceY = ynToBool(text); s.state = 'clinic_pref'; say(await t('Do you want your usual clinic (type "My clinic") or search nearby (type "Nearby")?')); }
+    }
+    else if (s.state === 'clinic_pref') {
+      s.useOwnClinic = /my clinic/i.test(text);
+      s.state = 'date';
+      say(await t('What date works best? (MM/DD/YYYY). You can also say "ASAP".'));
+    }
+    else if (s.state === 'date') {
+      if (looksLikeASAP(text)) {
+        s.dateStr = ''; s.timeStr = ''; s.windowText = 'ASAP';
+        s.state = 'find';
+      } else {
+        const m = text.trim().match(/^\s*(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])\/(20\d{2})\s*$/);
+        if (!m) { say(await t('Please use MM/DD/YYYY (e.g., 10/25/2025), or say ASAP.')); }
+        else { s.dateStr = `${m[1]}/${m[2]}/${m[3]}`; s.state = 'time'; say(await t('Preferred time? (e.g., 10:30 AM). You can also say ASAP.')); }
+      }
+    }
+    else if (s.state === 'time') {
+      if (looksLikeASAP(text)) { s.timeStr = ''; s.windowText = 'ASAP'; s.state = 'find'; }
+      else {
+        const m = text.trim().match(/^\s*(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)\s*$/i);
+        if (!m) { say(await t('Use HH:MM AM/PM (e.g., 10:30 AM), or say ASAP.')); }
+        else { s.timeStr = `${m[1]}:${m[2]} ${m[3].toUpperCase()}`; s.windowText = `${s.dateStr}, ${s.timeStr}`; s.state = 'find'; }
+      }
+    }
+
+    if (s.state === 'find') {
+      const specialty = inferSpecialty(s.symptoms);
+      const clinics = await findClinics(s.zip, specialty);
+      s.clinics = clinics;
+
+      if (!clinics.length) {
+        say(await t(`I couldn't find clinics nearby. Please check the ZIP or try a broader area.`));
+        s.state = 'zip';
+      } else {
+        const best = clinics[0];
+        s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
+
+        const reason =
+          s.useOwnClinic ? 'your usual clinic preference'
+          : (specialty !== 'clinic' ? `your symptoms indicating ${specialty}` : 'distance and availability');
+
+        say(await t(`Based on ${reason}, I suggest **${best.name}**${best.address?` — ${best.address}`:''}${best.rating?` (rating ${best.rating}/5)`:''}.`));
+        say(await t(`Book for ${s.windowText}? Reply YES to call now, or type NEXT to see another option.`));
+        s.state = 'confirm_choice';
+      }
+    }
+    else if (s.state === 'confirm_choice') {
+      if (/^next\b/i.test(text)) {
+        const list = s.clinics || [];
+        const idx = list.findIndex(c => c.name === s.chosenClinic?.name);
+        const nxt = list[idx + 1];
+        if (!nxt) { say(await t('No more options. Type YES to proceed or RESET to start again.')); }
+        else {
+          s.chosenClinic = { name: nxt.name, phone: nxt.phone, address: nxt.address, rating: nxt.rating };
+          say(await t(`Option: **${nxt.name}**${nxt.address?` — ${nxt.address}`:''}${nxt.rating?` (rating ${nxt.rating}/5)`:''}.`));
+          say(await t(`Book for ${s.windowText}? Reply YES to call, or NEXT for another.`));
+        }
+      } else if (/^yes\b/i.test(text)) {
+        if (!s?.chosenClinic?.phone) {
+          say(await t('This clinic did not list a phone number via Maps. Reply NEXT for another option.'));
+        } else {
+          const nameEn   = await translateToEnglish(s.patientName, s.lang || 'auto');
+          const reasonEn = await translateToEnglish(s.symptoms,   s.lang || 'auto');
+
+          await startClinicCall({
+            to: s.chosenClinic.phone,
+            name: nameEn,
+            reason: reasonEn,
+            preferredTimes: [s.windowText],
+            clinicName: s.chosenClinic.name,
+            callback: ''
+          });
+
+          s.state = 'calling';
+          say(await t(`Calling ${s.chosenClinic.name} now to book for ${s.windowText}. I'll confirm here.`));
+        }
+      } else if (/^reset|restart|new$/i.test(text)) {
+        s = { state:'start', lang:s.lang }; say(await t('Reset. Type NEW to begin.'));
+      } else {
+        say(await t('Please reply YES to book, NEXT for another option, or RESET to start over.'));
+      }
+    }
+  }
+
+  smsSessions.set(from, s);
+  
+  // Combine all lines into a single reply for web UI
+  const reply = LINES.join('\n\n');
+  return res.json({ reply });
+});
+
 /* ---------- Health ---------- */
 app.get('/healthz', (req,res)=>res.json({ ok:true }));
 
