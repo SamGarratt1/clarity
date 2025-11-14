@@ -340,37 +340,72 @@ async function translateToEnglish(text, sourceLang = 'auto') {
 }
 
 /* ---------- Maps ---------- */
-function inferSpecialty(symptoms = '') {
-  const s = (symptoms||'').toLowerCase().trim();
+// Use AI to intelligently infer specialty from vague symptoms
+async function inferSpecialty(symptoms = '') {
+  const s = (symptoms||'').trim();
   if (!s) return null;
   
-  // More specific patterns first - check for exact word boundaries to avoid false matches
-  // Mental health patterns - check early to avoid conflicts
-  if (/\b(mental|depression|anxiety|therapy|counseling|psych|psychiatrist|psychologist|bipolar|ptsd|trauma|suicidal|panic|ocd)\b/i.test(s)) return 'psychiatrist';
-  // Skin issues
-  if (/\b(skin|rash|acne|mole|dermat|eczema|psoriasis|wart|melanoma|dermatitis)\b/i.test(s)) return 'dermatologist';
-  // Dental issues
-  if (/\b(tooth|teeth|gum|dent|dental|oral|root canal|extraction|braces|implant)\b/i.test(s)) return 'dentist';
-  // Eye issues
-  if (/\b(eye|vision|ophthalm|glasses|contact|retina|glaucoma|cataract|blind|sight)\b/i.test(s)) return 'ophthalmologist';
-  // ENT issues - be careful not to match "mental" (contains "ent" but not as a word)
-  if (/\b(throat|ear|nose|sinus|ent\b|hearing|tonsil|adenoid|earache|sore throat|hoarse)\b/i.test(s)) return 'otolaryngologist';
-  // Heart/cardiac issues
-  if (/\b(chest pain|shortness|palpit|heart|cardiac|cardio|hypertension|blood pressure|arrhythmia)\b/i.test(s)) return 'cardiologist';
-  // GI issues
-  if (/\b(stomach|abdomen|nausea|gi\b|diarrhea|vomit|digest|ibs|acid reflux|ulcer|constipation)\b/i.test(s)) return 'gastroenterologist';
-  // Orthopedic issues
-  if (/\b(bone|joint|fracture|ortho|knee|hip|shoulder|back pain|spine|arthritis|broken|dislocation)\b/i.test(s)) return 'orthopedic';
-  // Urgent care
-  if (/\b(flu|fever|cough|urgent|injury|stitches|sprain|emergency|broken|cut|burn)\b/i.test(s)) return 'urgent care';
-  // Women's health
-  if (/\b(women|gynec|obgyn|pregnancy|prenatal|pap|mammogram|menstrual|ovarian)\b/i.test(s)) return 'gynecologist';
-  // Pediatric
-  if (/\b(child|pediatric|pediatrician|baby|infant|teenager|kids|toddler)\b/i.test(s)) return 'pediatrician';
-  return null; // Return null for general issues
+  try {
+    const resp = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0,
+      messages: [
+        {
+          role: 'system',
+          content: `You are a medical triage assistant. Based on the patient's symptoms, determine the most appropriate medical specialty. 
+
+Return ONLY one of these exact values (or "null" for general/primary care):
+- "psychiatrist" (mental health, depression, anxiety, therapy, counseling, psychological issues)
+- "dermatologist" (skin, rash, acne, moles, dermatology)
+- "dentist" (teeth, dental, oral health)
+- "ophthalmologist" (eyes, vision, eye care)
+- "otolaryngologist" (ear, nose, throat, ENT, hearing)
+- "cardiologist" (heart, cardiac, chest pain, cardiovascular)
+- "gastroenterologist" (stomach, GI, digestive, nausea, vomiting)
+- "urologist" (urinary, bladder, kidney, genitourinary, testicular pain)
+- "orthopedic" (bones, joints, fractures, orthopedic, back pain, spine)
+- "urgent care" (urgent, emergency, injury, cuts, burns, immediate care needed, walk-in)
+- "gynecologist" (women's health, gynecology, OBGYN, pregnancy, reproductive)
+- "pediatrician" (children, pediatric, babies, kids)
+- "null" (general checkup, primary care, no specific specialty needed)
+
+Be intelligent: "my balls hurt" = urologist, "mental issues" = psychiatrist, "I'm sad" = psychiatrist, vague symptoms = null.`
+        },
+        {
+          role: 'user',
+          content: `Symptoms: "${s}"`
+        }
+      ]
+    });
+    
+    const result = (resp.choices?.[0]?.message?.content || '').trim().toLowerCase();
+    
+    // Validate the result is one of our specialties
+    const validSpecialties = [
+      'psychiatrist', 'dermatologist', 'dentist', 'ophthalmologist', 
+      'otolaryngologist', 'cardiologist', 'gastroenterologist', 'urologist',
+      'orthopedic', 'urgent care', 'gynecologist', 'pediatrician', 'null'
+    ];
+    
+    if (validSpecialties.includes(result)) {
+      return result === 'null' ? null : result;
+    }
+    
+    // Fallback to null if AI returns something unexpected
+    console.warn(`AI returned unexpected specialty: "${result}" for symptoms: "${s}"`);
+    return null;
+  } catch (e) {
+    console.error('Error inferring specialty:', e.message);
+    // Fallback to null on error
+    return null;
+  }
 }
 
 async function findClinics(zip, specialty = null, symptoms = '') {
+  // Handle urgent care specially - they don't take appointments
+  if (specialty === 'urgent care') {
+    return await findUrgentCare(zip);
+  }
   try {
     const geoResp = await mapsClient.geocode({ params: { address: zip, key: GOOGLE_MAPS_API_KEY }});
     if (!geoResp.data.results.length) return [];
@@ -391,6 +426,7 @@ async function findClinics(zip, specialty = null, symptoms = '') {
           'otolaryngologist': 'otolaryngologist ENT ear nose throat',
           'cardiologist': 'cardiologist heart doctor',
           'gastroenterologist': 'gastroenterologist GI doctor',
+          'urologist': 'urologist urinary',
           'orthopedic': 'orthopedic surgeon',
           'urgent care': 'urgent care emergency',
           'gynecologist': 'gynecologist OBGYN',
@@ -400,14 +436,14 @@ async function findClinics(zip, specialty = null, symptoms = '') {
         const keyword = specialtyKeywords[specialty] || specialty;
         
         const specialtyResp = await mapsClient.placesNearby({
-          params: {
-            location: { lat, lng },
-            radius: 10000,
+      params: {
+        location: { lat, lng },
+        radius: 10000,
             keyword: keyword,
-            type: 'doctor',
-            key: GOOGLE_MAPS_API_KEY
-          }
-        });
+        type: 'doctor',
+        key: GOOGLE_MAPS_API_KEY
+      }
+    });
 
         // Keywords to verify clinic actually matches specialty
         const specialtyVerification = {
@@ -418,6 +454,7 @@ async function findClinics(zip, specialty = null, symptoms = '') {
           'otolaryngologist': ['ent', 'otolaryng', 'ear nose throat', 'hearing'],
           'cardiologist': ['cardio', 'heart', 'cardiac'],
           'gastroenterologist': ['gastro', 'gi ', 'digestive'],
+          'urologist': ['urolog', 'urinary', 'bladder', 'kidney'],
           'orthopedic': ['ortho', 'bone', 'joint', 'spine'],
           'urgent care': ['urgent', 'emergency', 'walk-in'],
           'gynecologist': ['gynec', 'obgyn', 'women', 'obstetric'],
@@ -663,9 +700,23 @@ app.post('/gather', async (req, res) => {
   else if (/\b(walk ?in|come any time|anytime|any time)\b/.test(speech)) intent = 'walkin';
 
   if (intent === 'walkin') {
-    s.confirmed = { time: 'Walk-in / earliest available today' };
-    const confirm = `Great—I'll note walk-in availability for patient ${s.userRequest.name}. Please confirm.`;
-    speak(twiml, confirm); twiml.gather({ input:'speech', action:'/gather', method:'POST', speechTimeout:'auto', timeout:5 });
+    // Receptionist said "come anytime" or "walk-in" - update session and end call
+    s.confirmed = { time: 'Walk-in / come anytime - no appointment needed' };
+    s.status = 'walk_in';
+    
+    // Send SMS to user with address and instructions
+    try {
+      await client.messages.create({
+        to: s.userRequest.callback || s.userRequest.clinicPhone,
+        from: TWILIO_CALLER_ID,
+        body: `✅ ${s.userRequest.clinicName} (${s.userRequest.clinicPhone || 'clinic'}) said you can come anytime - no appointment needed. Address: ${s.userRequest.clinicName}. Walk-in during their hours.`
+      });
+    } catch (e) {
+      console.error('SMS error:', e.message);
+    }
+    
+    speak(twiml, `Thank you! I've noted that ${s.userRequest.name} can come anytime. Have a great day.`);
+    twiml.hangup();
     return res.type('text/xml').send(twiml.toString());
   }
 
@@ -904,14 +955,14 @@ app.post('/chat', async (req, res) => {
         }
         say(t(`Book for ${s.windowText}? Reply YES to call, or NEXT for another.`));
       }
-      } else if (/^yes\b/i.test(text)) {
+    } else if (/^yes\b/i.test(text)) {
         if (s.state !== 'final_confirm') {
           // If they said YES but haven't selected an option yet, show options again
           say(t('Please select an option first. Reply **1**, **2**, or **3** to choose a clinic.'));
         } else if (!s?.chosenClinic?.phone) {
           say(t('This clinic does not have a phone number available. Please select a different option (1, 2, or 3).'));
           s.state = 'confirm_choice';
-        } else {
+      } else {
         // translate name/reason to English for the call
         const nameEn   = await translateToEnglish(s.patientName, s.lang || 'auto');
         const reasonEn = await translateToEnglish(s.symptoms,   s.lang || 'auto');
@@ -1094,7 +1145,7 @@ app.post('/chat/web', async (req, res) => {
     }
 
     if (s.state === 'find') {
-      const specialty = inferSpecialty(s.symptoms);
+      const specialty = await inferSpecialty(s.symptoms);
       const clinics = await findClinics(s.zip, specialty, s.symptoms);
       s.clinics = clinics;
 
