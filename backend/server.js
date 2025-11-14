@@ -552,12 +552,12 @@ app.post('/chat', async (req, res) => {
     say(t('What ZIP code should I search near? (5 digits)'));
   }
   else if (s.state === 'zip') {
-    if (!isValidZip(text)) { say(await t('Please enter a 5-digit ZIP (e.g., 30309).')); }
-    else { s.zip = text.trim(); s.state = 'ins'; say(await t('Do you have insurance? (Y/N)')); }
+    if (!isValidZip(text)) { say(t('Please enter a 5-digit ZIP (e.g., 30309).')); }
+    else { s.zip = text.trim(); s.state = 'ins'; say(t('Do you have insurance? (Y/N)')); }
   }
   else if (s.state === 'ins') {
-    if (!ynRe.test(text)) { say(await t('Please reply Y or N for insurance.')); }
-    else { s.insuranceY = ynToBool(text); s.state = 'clinic_pref'; say(await t('Do you want your usual clinic (type "My clinic") or search nearby (type "Nearby")?')); }
+    if (!ynRe.test(text)) { say(t('Please reply Y or N for insurance.')); }
+    else { s.insuranceY = ynToBool(text); s.state = 'clinic_pref'; say(t('Do you want your usual clinic (type "My clinic") or search nearby (type "Nearby")?')); }
   }
   else if (s.state === 'clinic_pref') {
     s.useOwnClinic = /my clinic/i.test(text);
@@ -570,15 +570,15 @@ app.post('/chat', async (req, res) => {
       s.state = 'find';
     } else {
       const m = text.trim().match(/^\s*(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])\/(20\d{2})\s*$/);
-      if (!m) { say(await t('Please use MM/DD/YYYY (e.g., 10/25/2025), or say ASAP.')); }
-      else { s.dateStr = `${m[1]}/${m[2]}/${m[3]}`; s.state = 'time'; say(await t('Preferred time? (e.g., 10:30 AM). You can also say ASAP.')); }
+      if (!m) { say(t('Please use MM/DD/YYYY (e.g., 10/25/2025), or say ASAP.')); }
+      else { s.dateStr = `${m[1]}/${m[2]}/${m[3]}`; s.state = 'time'; say(t('Preferred time? (e.g., 10:30 AM). You can also say ASAP.')); }
     }
   }
   else if (s.state === 'time') {
     if (looksLikeASAP(text)) { s.timeStr = ''; s.windowText = 'ASAP'; s.state = 'find'; }
     else {
       const m = text.trim().match(/^\s*(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)\s*$/i);
-      if (!m) { say(await t('Use HH:MM AM/PM (e.g., 10:30 AM), or say ASAP.')); }
+      if (!m) { say(t('Use HH:MM AM/PM (e.g., 10:30 AM), or say ASAP.')); }
       else { s.timeStr = `${m[1]}:${m[2]} ${m[3].toUpperCase()}`; s.windowText = `${s.dateStr}, ${s.timeStr}`; s.state = 'find'; }
     }
   }
@@ -611,7 +611,7 @@ app.post('/chat', async (req, res) => {
       const list = s.clinics || [];
       const idx = list.findIndex(c => c.name === s.chosenClinic?.name);
       const nxt = list[idx + 1];
-      if (!nxt) { say(await t('No more options. Type YES to proceed or RESET to start again.')); }
+      if (!nxt) { say(t('No more options. Type YES to proceed or RESET to start again.')); }
       else {
         s.chosenClinic = { name: nxt.name, phone: nxt.phone, address: nxt.address, rating: nxt.rating };
         say(t(`Option: **${nxt.name}**${nxt.address?` — ${nxt.address}`:''}${nxt.rating?` (rating ${nxt.rating}/5)`:''}.`));
@@ -642,7 +642,7 @@ app.post('/chat', async (req, res) => {
         say(t(`Calling ${s.chosenClinic.name} now to book for ${s.windowText}. I’ll confirm here.`));
       }
     } else if (/^reset|restart|new$/i.test(text)) {
-      s = { state:'start', lang:s.lang }; say(await t('Reset. Type NEW to begin.'));
+      s = { state:'start', lang:s.lang }; say(t('Reset. Type NEW to begin.'));
     } else {
       say(t('Please reply YES to book, NEXT for another option, or RESET to start over.'));
     }
@@ -788,7 +788,7 @@ app.post('/chat/web', async (req, res) => {
       if (looksLikeASAP(text)) { s.timeStr = ''; s.windowText = 'ASAP'; s.state = 'find'; }
       else {
         const m = text.trim().match(/^\s*(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)\s*$/i);
-        if (!m) { say(await t('Use HH:MM AM/PM (e.g., 10:30 AM), or say ASAP.')); }
+        if (!m) { say(t('Use HH:MM AM/PM (e.g., 10:30 AM), or say ASAP.')); }
         else { s.timeStr = `${m[1]}:${m[2]} ${m[3].toUpperCase()}`; s.windowText = `${s.dateStr}, ${s.timeStr}`; s.state = 'find'; }
       }
     }
