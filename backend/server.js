@@ -811,9 +811,28 @@ app.post('/chat', async (req, res) => {
       else {
         s.chosenClinic = { name: nxt.name, phone: nxt.phone, address: nxt.address, rating: nxt.rating };
         const reasons = [];
+        
+        // Get specialty display name
+        const specialtyNames = {
+          'dermatologist': 'Dermatology',
+          'dentist': 'Dental',
+          'ophthalmologist': 'Eye Care',
+          'otolaryngologist': 'ENT',
+          'cardiologist': 'Cardiology',
+          'gastroenterologist': 'Gastroenterology',
+          'orthopedic': 'Orthopedics',
+          'urgent care': 'Urgent Care',
+          'psychiatrist': 'Mental Health',
+          'gynecologist': 'Women\'s Health',
+          'pediatrician': 'Pediatrics'
+        };
+        const specialtyName = nxt.isSpecialty && nxt.specialty 
+          ? specialtyNames[nxt.specialty] || nxt.specialty 
+          : 'General Practice';
+        
         if (nxt.rating && nxt.rating >= 4.0) reasons.push(`⭐ ${t('rating')}: ${nxt.rating}/5`);
         
-        say(t(`**${nxt.name}**`));
+        say(t(`**${nxt.name} — ${specialtyName}**`));
         if (nxt.address) {
           say(t(`*${nxt.address}*`));
         }
@@ -1031,22 +1050,26 @@ app.post('/chat/web', async (req, res) => {
           const clinic = topClinics[i];
           const reasons = [];
 
+          // Get specialty display name
+          const specialtyNames = {
+            'dermatologist': 'Dermatology',
+            'dentist': 'Dental',
+            'ophthalmologist': 'Eye Care',
+            'otolaryngologist': 'ENT',
+            'cardiologist': 'Cardiology',
+            'gastroenterologist': 'Gastroenterology',
+            'orthopedic': 'Orthopedics',
+            'urgent care': 'Urgent Care',
+            'psychiatrist': 'Mental Health',
+            'gynecologist': 'Women\'s Health',
+            'pediatrician': 'Pediatrics'
+          };
+          const specialtyName = clinic.isSpecialty && clinic.specialty 
+            ? specialtyNames[clinic.specialty] || clinic.specialty 
+            : 'General Practice';
+
           // Build reasons why this is a top selection
           if (clinic.isSpecialty && clinic.specialty) {
-            const specialtyNames = {
-              'dermatologist': 'Dermatology',
-              'dentist': 'Dental',
-              'ophthalmologist': 'Eye Care',
-              'otolaryngologist': 'ENT',
-              'cardiologist': 'Cardiology',
-              'gastroenterologist': 'Gastroenterology',
-              'orthopedic': 'Orthopedics',
-              'urgent care': 'Urgent Care',
-              'psychiatrist': 'Mental Health',
-              'gynecologist': 'Women\'s Health',
-              'pediatrician': 'Pediatrics'
-            };
-            const specialtyName = specialtyNames[clinic.specialty] || clinic.specialty;
             reasons.push(`🏥 Specializes in ${specialtyName}`);
           }
           if (i === 0 && !clinic.isSpecialty) reasons.push('📍 Closest to your location');
@@ -1055,8 +1078,8 @@ app.post('/chat/web', async (req, res) => {
           else if (clinic.rating && clinic.rating >= 3.5) reasons.push(`⭐ Rated ${clinic.rating}/5`);
 
           const clinicNum = i + 1;
-          // Clinic name in big bold
-          say(t(`**Option ${clinicNum}: ${clinic.name}**`));
+          // Clinic name with specialty in big bold
+          say(t(`**Option ${clinicNum}: ${clinic.name} — ${specialtyName}**`));
           
           // Address as subheading
           if (clinic.address) {
@@ -1104,9 +1127,28 @@ app.post('/chat/web', async (req, res) => {
             const clinic = remaining[i];
             const optionNum = shownCount + i + 1;
             const reasons = [];
+            
+            // Get specialty display name
+            const specialtyNames = {
+              'dermatologist': 'Dermatology',
+              'dentist': 'Dental',
+              'ophthalmologist': 'Eye Care',
+              'otolaryngologist': 'ENT',
+              'cardiologist': 'Cardiology',
+              'gastroenterologist': 'Gastroenterology',
+              'orthopedic': 'Orthopedics',
+              'urgent care': 'Urgent Care',
+              'psychiatrist': 'Mental Health',
+              'gynecologist': 'Women\'s Health',
+              'pediatrician': 'Pediatrics'
+            };
+            const specialtyName = clinic.isSpecialty && clinic.specialty 
+              ? specialtyNames[clinic.specialty] || clinic.specialty 
+              : 'General Practice';
+            
             if (clinic.rating && clinic.rating >= 4.0) reasons.push(`⭐ ${t('rating')}: ${clinic.rating}/5`);
             
-            say(t(`**Option ${optionNum}: ${clinic.name}**`));
+            say(t(`**Option ${optionNum}: ${clinic.name} — ${specialtyName}**`));
             if (clinic.address) {
               say(t(`*${clinic.address}*`));
             }
