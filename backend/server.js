@@ -504,6 +504,16 @@ app.post('/chat/web', async (req, res) => {
 
   function looksLikeASAP(str){ return /\b(asap|as soon as possible|soonest|earliest)\b/i.test(str||''); }
 
+  // Handle language change messages silently
+  if (/^\[Language changed to (\w+)\]$/i.test(text)) {
+    const langMatch = text.match(/^\[Language changed to (\w+)\]$/i);
+    if (langMatch && langMatch[1]) {
+      s.lang = langMatch[1];
+      smsSessions.set(from, s);
+      return res.json({ reply: '' }); // Silent response for language change
+    }
+  }
+  
   // Handle quick actions
   if (/^use my usual clinic/i.test(text)) {
     s.useOwnClinic = true;

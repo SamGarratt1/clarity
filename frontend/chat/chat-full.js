@@ -196,11 +196,29 @@ quickButtons.forEach((btn) => {
 langButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
     const lang = btn.dataset.lang;
+    const oldLang = currentLang;
     setLang(lang);
-    addMessage(
-      "assistant",
-      `Language updated to ${btn.textContent}. I'll communicate with you in this language and translate for the clinic when I call.`
-    );
+    
+    // Only show message if language actually changed
+    if (oldLang !== lang) {
+      addMessage(
+        "assistant",
+        `Language updated to ${btn.textContent}. I'll communicate with you in this language and translate for the clinic when I call. Type "NEW" to start a new conversation in ${btn.textContent}.`
+      );
+      
+      // Send language update to backend silently to update the session
+      // This ensures future messages use the new language
+      fetch(`${API_URL}/chat/web`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: `[Language changed to ${lang}]`,
+          source: "web",
+          lang: lang,
+          sessionId: getSessionId()
+        })
+      }).catch(err => console.error("Language update error:", err));
+    }
   });
 });
 
