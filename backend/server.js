@@ -551,9 +551,13 @@ app.post('/chat', async (req, res) => {
   const { from, text, lang } = req.body || {};
   if (!from || !text) return res.status(400).json({ error: 'from and text required' });
 
+  // Validate and sanitize language - only allow supported languages
+  const supportedLangs = ['en', 'es', 'fr', 'pt'];
+  const validLang = (lang && supportedLangs.includes(lang)) ? lang : 'en';
+
   let s = smsSessions.get(from) || {
     state: 'start',
-    lang: lang || 'en',
+    lang: validLang,
     // collected:
     patientName: '',
     symptoms: '',
