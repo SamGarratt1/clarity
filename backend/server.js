@@ -341,19 +341,32 @@ async function translateToEnglish(text, sourceLang = 'auto') {
 
 /* ---------- Maps ---------- */
 function inferSpecialty(symptoms = '') {
-  const s = (symptoms||'').toLowerCase();
-  // More specific patterns first
-  if (/skin|rash|acne|mole|dermat|eczema|psoriasis|wart/i.test(s)) return 'dermatologist';
-  if (/tooth|teeth|gum|dent|dental|oral|root canal|extraction/i.test(s)) return 'dentist';
-  if (/eye|vision|ophthalm|glasses|contact|retina|glaucoma|cataract/i.test(s)) return 'ophthalmologist';
-  if (/throat|ear|nose|sinus|ent|hearing|tonsil|adenoid/i.test(s)) return 'otolaryngologist';
-  if (/chest pain|shortness|palpit|heart|cardiac|cardio|hypertension|blood pressure/i.test(s)) return 'cardiologist';
-  if (/stomach|abdomen|nausea|gi|diarrhea|vomit|digest|ibs|acid reflux|ulcer/i.test(s)) return 'gastroenterologist';
-  if (/bone|joint|fracture|ortho|knee|hip|shoulder|back pain|spine|arthritis/i.test(s)) return 'orthopedic';
-  if (/flu|fever|cough|urgent|injury|stitches|sprain|emergency|broken/i.test(s)) return 'urgent care';
-  if (/mental|depression|anxiety|therapy|counseling|psych|psychiatrist/i.test(s)) return 'psychiatrist';
-  if (/women|gynec|obgyn|pregnancy|prenatal|pap|mammogram/i.test(s)) return 'gynecologist';
-  if (/child|pediatric|pediatrician|baby|infant|teenager/i.test(s)) return 'pediatrician';
+  const s = (symptoms||'').toLowerCase().trim();
+  if (!s) return null;
+  
+  // More specific patterns first - check for exact word boundaries to avoid false matches
+  // Mental health patterns - check early to avoid conflicts
+  if (/\b(mental|depression|anxiety|therapy|counseling|psych|psychiatrist|psychologist|bipolar|ptsd|trauma|suicidal|panic|ocd)\b/i.test(s)) return 'psychiatrist';
+  // Skin issues
+  if (/\b(skin|rash|acne|mole|dermat|eczema|psoriasis|wart|melanoma|dermatitis)\b/i.test(s)) return 'dermatologist';
+  // Dental issues
+  if (/\b(tooth|teeth|gum|dent|dental|oral|root canal|extraction|braces|implant)\b/i.test(s)) return 'dentist';
+  // Eye issues
+  if (/\b(eye|vision|ophthalm|glasses|contact|retina|glaucoma|cataract|blind|sight)\b/i.test(s)) return 'ophthalmologist';
+  // ENT issues - be careful not to match "mental" (contains "ent" but not as a word)
+  if (/\b(throat|ear|nose|sinus|ent\b|hearing|tonsil|adenoid|earache|sore throat|hoarse)\b/i.test(s)) return 'otolaryngologist';
+  // Heart/cardiac issues
+  if (/\b(chest pain|shortness|palpit|heart|cardiac|cardio|hypertension|blood pressure|arrhythmia)\b/i.test(s)) return 'cardiologist';
+  // GI issues
+  if (/\b(stomach|abdomen|nausea|gi\b|diarrhea|vomit|digest|ibs|acid reflux|ulcer|constipation)\b/i.test(s)) return 'gastroenterologist';
+  // Orthopedic issues
+  if (/\b(bone|joint|fracture|ortho|knee|hip|shoulder|back pain|spine|arthritis|broken|dislocation)\b/i.test(s)) return 'orthopedic';
+  // Urgent care
+  if (/\b(flu|fever|cough|urgent|injury|stitches|sprain|emergency|broken|cut|burn)\b/i.test(s)) return 'urgent care';
+  // Women's health
+  if (/\b(women|gynec|obgyn|pregnancy|prenatal|pap|mammogram|menstrual|ovarian)\b/i.test(s)) return 'gynecologist';
+  // Pediatric
+  if (/\b(child|pediatric|pediatrician|baby|infant|teenager|kids|toddler)\b/i.test(s)) return 'pediatrician';
   return null; // Return null for general issues
 }
 
@@ -369,18 +382,53 @@ async function findClinics(zip, specialty = null, symptoms = '') {
     // First, try to find specialty clinics if a specialty was identified
     if (specialty) {
       try {
+        // Use better keywords for Google Maps search
+        const specialtyKeywords = {
+          'psychiatrist': 'psychiatrist mental health',
+          'dermatologist': 'dermatologist skin doctor',
+          'dentist': 'dentist dental',
+          'ophthalmologist': 'ophthalmologist eye doctor',
+          'otolaryngologist': 'otolaryngologist ENT ear nose throat',
+          'cardiologist': 'cardiologist heart doctor',
+          'gastroenterologist': 'gastroenterologist GI doctor',
+          'orthopedic': 'orthopedic surgeon',
+          'urgent care': 'urgent care emergency',
+          'gynecologist': 'gynecologist OBGYN',
+          'pediatrician': 'pediatrician children doctor'
+        };
+        
+        const keyword = specialtyKeywords[specialty] || specialty;
+        
         const specialtyResp = await mapsClient.placesNearby({
           params: {
             location: { lat, lng },
             radius: 10000,
-            keyword: specialty,
+            keyword: keyword,
             type: 'doctor',
             key: GOOGLE_MAPS_API_KEY
           }
         });
 
+        // Keywords to verify clinic actually matches specialty
+        const specialtyVerification = {
+          'psychiatrist': ['psych', 'mental', 'psychiatry', 'psychiatric', 'behavioral', 'counseling'],
+          'dermatologist': ['dermat', 'skin', 'dermatology'],
+          'dentist': ['dent', 'dental', 'oral'],
+          'ophthalmologist': ['ophthalm', 'eye', 'vision', 'retina'],
+          'otolaryngologist': ['ent', 'otolaryng', 'ear nose throat', 'hearing'],
+          'cardiologist': ['cardio', 'heart', 'cardiac'],
+          'gastroenterologist': ['gastro', 'gi ', 'digestive'],
+          'orthopedic': ['ortho', 'bone', 'joint', 'spine'],
+          'urgent care': ['urgent', 'emergency', 'walk-in'],
+          'gynecologist': ['gynec', 'obgyn', 'women', 'obstetric'],
+          'pediatrician': ['pediatric', 'children', 'kids', 'pediatrician']
+        };
+        
+        const verifyKeywords = specialtyVerification[specialty] || [specialty];
+        const nameLower = (name) => (name || '').toLowerCase();
+
         specialtyClinics = await Promise.all(
-          specialtyResp.data.results.slice(0, 10).map(async (p) => {
+          specialtyResp.data.results.slice(0, 15).map(async (p) => {
             try {
               const detailsResp = await mapsClient.placeDetails({
                 params: {
@@ -390,8 +438,18 @@ async function findClinics(zip, specialty = null, symptoms = '') {
                 }
               });
               const details = detailsResp.data.result;
+              const clinicName = details.name || p.name;
+              
+              // Verify the clinic name actually matches the specialty
+              const nameMatches = verifyKeywords.some(keyword => 
+                nameLower(clinicName).includes(keyword.toLowerCase())
+              );
+              
+              // Only include if it matches the specialty
+              if (!nameMatches) return null;
+              
               return {
-                name: details.name || p.name,
+                name: clinicName,
                 address: details.formatted_address || p.vicinity || '',
                 rating: details.rating || p.rating || null,
                 location: details.geometry?.location || p.geometry?.location,
