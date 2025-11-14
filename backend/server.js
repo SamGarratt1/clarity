@@ -504,7 +504,10 @@ app.post('/chat/web', async (req, res) => {
   async function t(msg) {
     const currentLang = s.lang || 'en';
     // Don't translate if English
-    if (currentLang === 'en') return msg;
+    if (currentLang === 'en') {
+      console.log(`Skipping translation (English): "${msg.substring(0, 50)}..."`);
+      return msg;
+    }
     
     // Map language codes to full names for better translation
     const langMap = {
@@ -516,21 +519,27 @@ app.post('/chat/web', async (req, res) => {
     };
     const langName = langMap[currentLang] || currentLang;
     
+    // Skip empty messages
+    if (!msg || msg.trim().length === 0) return msg;
+    
     try {
-      console.log(`Translating to ${langName} (${currentLang}): "${msg.substring(0, 50)}..."`);
+      console.log(`[TRANSLATE] Language: ${currentLang} (${langName}), Session lang: ${s.lang}, Message: "${msg.substring(0, 50)}..."`);
       const r = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         temperature: 0,
         messages: [
-          { role:'system', content:`You are a professional translator. Translate the following text to ${langName}. Return ONLY the translation, nothing else.` },
+          { role:'system', content:`You are a professional translator. Translate the following text to ${langName}. Return ONLY the translation, nothing else. Do not add any explanations or notes.` },
           { role:'user', content: msg }
         ]
       });
       const translated = (r.choices?.[0]?.message?.content || msg).trim();
-      console.log(`Translation result: "${translated.substring(0, 50)}..."`);
+      console.log(`[TRANSLATE] Result: "${translated.substring(0, 50)}..."`);
+      if (translated === msg) {
+        console.warn(`[TRANSLATE] Warning: Translation returned same text!`);
+      }
       return translated;
     } catch (e) {
-      console.error(`Translation error for ${langName}:`, e.message);
+      console.error(`[TRANSLATE] Error for ${langName}:`, e.message, e.stack);
       return msg; // Return original on error
     }
   }
@@ -573,8 +582,13 @@ app.post('/chat/web', async (req, res) => {
   } else {
     // state machine (same as /chat)
     if (s.state === 'start' || /^new$/i.test(text)) {
+      console.log(`[NEW] Starting new conversation. Current language: ${s.lang || 'en'}, Request lang: ${lang || 'none'}`);
       s.state = 'name';
-      say(await t(`Welcome to ${BRAND_NAME} — ${BRAND_SLOGAN}. What is the patient's full name? (First Last)`));
+      const welcomeMsg = `Welcome to ${BRAND_NAME} — ${BRAND_SLOGAN}. What is the patient's full name? (First Last)`;
+      console.log(`[NEW] Welcome message (before translation): "${welcomeMsg}"`);
+      const translatedWelcome = await t(welcomeMsg);
+      console.log(`[NEW] Welcome message (after translation): "${translatedWelcome}"`);
+      say(translatedWelcome);
     }
     else if (s.state === 'name') {
       s.patientName = text.trim();
