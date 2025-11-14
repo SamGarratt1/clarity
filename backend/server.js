@@ -1112,7 +1112,25 @@ app.post('/chat/web', async (req, res) => {
         if (selectedNum >= 1 && selectedNum <= topClinics.length) {
           const selected = topClinics[selectedNum - 1];
           s.chosenClinic = { name: selected.name, phone: selected.phone, address: selected.address, rating: selected.rating };
-          say(t(`Great! You selected **Option ${selectedNum}: ${selected.name}**.`));
+          
+          // Get specialty display name for selected clinic
+          const specialtyNames = {
+            'dermatologist': 'Dermatology',
+            'dentist': 'Dental',
+            'ophthalmologist': 'Eye Care',
+            'otolaryngologist': 'ENT',
+            'cardiologist': 'Cardiology',
+            'gastroenterologist': 'Gastroenterology',
+            'orthopedic': 'Orthopedics',
+            'urgent care': 'Urgent Care',
+            'psychiatrist': 'Mental Health',
+            'gynecologist': 'Women\'s Health',
+            'pediatrician': 'Pediatrics'
+          };
+          const specialtyName = selected.isSpecialty && selected.specialty 
+            ? specialtyNames[selected.specialty] || selected.specialty 
+            : 'General Practice';
+          say(t(`Great! You selected **Option ${selectedNum}: ${selected.name} — ${specialtyName}**.`));
           say(t(`Book for ${s.windowText}? Reply **YES** to call now, or **CANCEL** to choose a different option.`));
           s.state = 'final_confirm';
         } else {
