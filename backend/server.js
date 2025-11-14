@@ -583,6 +583,58 @@ async function findClinics(zip, specialty = null, symptoms = '') {
   }
 }
 
+// Special function for urgent care - they don't take appointments
+async function findUrgentCare(zip) {
+  try {
+    const geoResp = await mapsClient.geocode({ params: { address: zip, key: GOOGLE_MAPS_API_KEY }});
+    if (!geoResp.data.results.length) return [];
+    const { lat, lng } = geoResp.data.results[0].geometry.location;
+
+    const placesResp = await mapsClient.placesNearby({
+      params: {
+        location: { lat, lng },
+        radius: 10000,
+        keyword: 'urgent care walk-in emergency',
+        type: 'doctor',
+        key: GOOGLE_MAPS_API_KEY
+      }
+    });
+
+    const urgentCareClinics = await Promise.all(
+      placesResp.data.results.slice(0, 5).map(async (p) => {
+        try {
+          const detailsResp = await mapsClient.placeDetails({
+            params: {
+              place_id: p.place_id,
+              fields: ['name', 'formatted_address', 'formatted_phone_number', 'rating', 'geometry', 'opening_hours'],
+              key: GOOGLE_MAPS_API_KEY
+            }
+          });
+          const details = detailsResp.data.result;
+          return {
+            name: details.name || p.name,
+            address: details.formatted_address || p.vicinity || '',
+            rating: details.rating || p.rating || null,
+            location: details.geometry?.location || p.geometry?.location,
+            phone: details.formatted_phone_number || null,
+            isSpecialty: true,
+            specialty: 'urgent care',
+            isUrgentCare: true,
+            openingHours: details.opening_hours?.weekday_text || null
+          };
+        } catch (e) {
+          return null;
+        }
+      })
+    );
+
+    return urgentCareClinics.filter(c => c && c.phone);
+  } catch (e) {
+    console.error('Urgent care search error:', e.message);
+    return [];
+  }
+}
+
 /* ---------- AI utterances to receptionist (fallback) ---------- */
 function buildSystemPrompt(userReq) {
   return `
@@ -1153,63 +1205,94 @@ app.post('/chat/web', async (req, res) => {
         say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
         s.state = 'zip';
       } else {
-        // Show top 3 clinics with improved formatting
-        const topClinics = clinics.slice(0, 3);
-        s.chosenClinic = { name: topClinics[0].name, phone: topClinics[0].phone, address: topClinics[0].address, rating: topClinics[0].rating };
+        // Check if this is urgent care - handle differently (no appointments)
+        const isUrgentCare = clinics[0]?.isUrgentCare || specialty === 'urgent care';
+        
+        if (isUrgentCare) {
+          // Urgent care doesn't take appointments - just provide address and hours
+          const topUrgentCare = clinics.slice(0, 3);
+          say(t(`I found ${clinics.length} urgent care location${clinics.length > 1 ? 's' : ''} near you. These are walk-in clinics - no appointment needed:`));
+          say(t('')); // Empty line for spacing
 
-        say(t(`I found ${clinics.length} clinic${clinics.length > 1 ? 's' : ''} near you. Here are the top options:`));
-        say(t('')); // Empty line for spacing
-
-        for (let i = 0; i < topClinics.length; i++) {
-          const clinic = topClinics[i];
-          const reasons = [];
-
-          // Get specialty display name
-          const specialtyNames = {
-            'dermatologist': 'Dermatology',
-            'dentist': 'Dental',
-            'ophthalmologist': 'Eye Care',
-            'otolaryngologist': 'ENT',
-            'cardiologist': 'Cardiology',
-            'gastroenterologist': 'Gastroenterology',
-            'orthopedic': 'Orthopedics',
-            'urgent care': 'Urgent Care',
-            'psychiatrist': 'Mental Health',
-            'gynecologist': 'Women\'s Health',
-            'pediatrician': 'Pediatrics'
-          };
-          const specialtyName = clinic.isSpecialty && clinic.specialty 
-            ? specialtyNames[clinic.specialty] || clinic.specialty 
-            : 'General Practice';
-
-          // Build reasons why this is a top selection
-          if (clinic.isSpecialty && clinic.specialty) {
-            reasons.push(`🏥 Specializes in ${specialtyName}`);
-          }
-          if (i === 0 && !clinic.isSpecialty) reasons.push('📍 Closest to your location');
-          if (clinic.rating && clinic.rating >= 4.5) reasons.push(`⭐ Excellent rating (${clinic.rating}/5)`);
-          else if (clinic.rating && clinic.rating >= 4.0) reasons.push(`⭐ Good rating (${clinic.rating}/5)`);
-          else if (clinic.rating && clinic.rating >= 3.5) reasons.push(`⭐ Rated ${clinic.rating}/5`);
-
-          const clinicNum = i + 1;
-          // Clinic name with specialty in big bold
-          say(t(`**Option ${clinicNum}: ${clinic.name} — ${specialtyName}**`));
-          
-          // Address as subheading
-          if (clinic.address) {
-            say(t(`*${clinic.address}*`));
+          for (let i = 0; i < topUrgentCare.length; i++) {
+            const clinic = topUrgentCare[i];
+            const clinicNum = i + 1;
+            say(t(`**Option ${clinicNum}: ${clinic.name}**`));
+            if (clinic.address) {
+              say(t(`*${clinic.address}*`));
+            }
+            if (clinic.openingHours && clinic.openingHours.length > 0) {
+              say(t(`Hours: ${clinic.openingHours[0]}`));
+            }
+            if (clinic.rating && clinic.rating >= 4.0) {
+              say(t(`⭐ Rating: ${clinic.rating}/5`));
+            }
+            say(t('📍 Walk-in anytime - no appointment needed'));
+            say(t('')); // Empty line between options
           }
           
-          // Reasons why it's a top selection
-          if (reasons.length > 0) {
-            say(t(`• ${reasons.join('\n• ')}`));
+          say(t(`You can visit any of these locations anytime during their hours. No appointment needed for urgent care.`));
+          s.state = 'completed';
+        } else {
+          // Regular clinics - show options for appointment booking
+          const topClinics = clinics.slice(0, 3);
+          s.chosenClinic = { name: topClinics[0].name, phone: topClinics[0].phone, address: topClinics[0].address, rating: topClinics[0].rating };
+
+          say(t(`I found ${clinics.length} clinic${clinics.length > 1 ? 's' : ''} near you. Here are the top options:`));
+          say(t('')); // Empty line for spacing
+
+          for (let i = 0; i < topClinics.length; i++) {
+            const clinic = topClinics[i];
+            const reasons = [];
+
+            // Get specialty display name
+            const specialtyNames = {
+              'dermatologist': 'Dermatology',
+              'dentist': 'Dental',
+              'ophthalmologist': 'Eye Care',
+              'otolaryngologist': 'ENT',
+              'cardiologist': 'Cardiology',
+              'gastroenterologist': 'Gastroenterology',
+              'orthopedic': 'Orthopedics',
+              'urgent care': 'Urgent Care',
+              'psychiatrist': 'Mental Health',
+              'gynecologist': 'Women\'s Health',
+              'pediatrician': 'Pediatrics',
+              'urologist': 'Urology'
+            };
+            const specialtyName = clinic.isSpecialty && clinic.specialty 
+              ? specialtyNames[clinic.specialty] || clinic.specialty 
+              : 'General Practice';
+
+            // Build reasons why this is a top selection
+            if (clinic.isSpecialty && clinic.specialty) {
+              reasons.push(`🏥 Specializes in ${specialtyName}`);
+            }
+            if (i === 0 && !clinic.isSpecialty) reasons.push('📍 Closest to your location');
+            if (clinic.rating && clinic.rating >= 4.5) reasons.push(`⭐ Excellent rating (${clinic.rating}/5)`);
+            else if (clinic.rating && clinic.rating >= 4.0) reasons.push(`⭐ Good rating (${clinic.rating}/5)`);
+            else if (clinic.rating && clinic.rating >= 3.5) reasons.push(`⭐ Rated ${clinic.rating}/5`);
+
+            const clinicNum = i + 1;
+            // Clinic name with specialty in big bold
+            say(t(`**Option ${clinicNum}: ${clinic.name} — ${specialtyName}**`));
+            
+            // Address as subheading
+            if (clinic.address) {
+              say(t(`*${clinic.address}*`));
+            }
+            
+            // Reasons why it's a top selection
+            if (reasons.length > 0) {
+              say(t(`• ${reasons.join('\n• ')}`));
+            }
+            
+            say(t('')); // Empty line between options
           }
-          
-          say(t('')); // Empty line between options
+
+          say(t(`Which option would you like? Reply **1**, **2**, or **3** to select, or type **NEXT** to see more options.`));
+          s.state = 'confirm_choice';
         }
-
-        say(t(`Which option would you like? Reply **1**, **2**, or **3** to select, or type **NEXT** to see more options.`));
-        s.state = 'confirm_choice';
       }
     }
     else if (s.state === 'confirm_choice') {
