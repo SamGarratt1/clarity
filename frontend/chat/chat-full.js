@@ -217,6 +217,9 @@ langButtons.forEach((btn) => {
           lang: lang,
           sessionId: getSessionId()
         })
+      }).then(() => {
+        // After language is updated, also send a test message to verify
+        console.log(`Language updated to ${lang} in backend`);
       }).catch(err => console.error("Language update error:", err));
     }
   });

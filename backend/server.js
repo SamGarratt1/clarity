@@ -486,7 +486,13 @@ app.post('/chat/web', async (req, res) => {
     callback: ''
   };
 
-  if (lang) s.lang = lang;
+  // Always update language if provided (for language selector)
+  // This ensures language changes are immediately applied to existing sessions
+  if (lang && lang !== s.lang) {
+    s.lang = lang;
+    // Save immediately so language persists
+    smsSessions.set(from, s);
+  }
 
   const LINES = [];
   const say = (m) => LINES.push(m);
@@ -516,6 +522,11 @@ app.post('/chat/web', async (req, res) => {
       smsSessions.set(from, s);
       return res.json({ reply: '' }); // Silent response for language change
     }
+  }
+  
+  // Ensure language is always up to date from the request
+  if (lang && lang !== s.lang) {
+    s.lang = lang;
   }
   
   // Handle quick actions
