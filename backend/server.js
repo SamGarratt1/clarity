@@ -522,32 +522,52 @@ app.post('/chat/web', async (req, res) => {
     // Skip empty messages
     if (!msg || msg.trim().length === 0) return msg;
     
-    try {
-      console.log(`[TRANSLATE] Language: ${currentLang} (${langName}), Session lang: ${s.lang}, Message: "${msg.substring(0, 50)}..."`);
-      const r = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        temperature: 0,
-        messages: [
-          { role:'system', content:`You are a professional translator. Translate the following text to ${langName}. Return ONLY the translation, nothing else. Do not add any explanations or notes.` },
-          { role:'user', content: msg }
-        ]
-      });
-      const translated = (r.choices?.[0]?.message?.content || msg).trim();
-      console.log(`[TRANSLATE] Result: "${translated.substring(0, 50)}..."`);
-      if (translated === msg) {
-        console.warn(`[TRANSLATE] Warning: Translation returned same text!`);
+    // Retry logic for rate limits
+    const maxRetries = 3;
+    let retryDelay = 1000; // Start with 1 second
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          console.log(`[TRANSLATE] Retry attempt ${attempt + 1}/${maxRetries} after ${retryDelay}ms delay`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          retryDelay *= 2; // Exponential backoff: 1s, 2s, 4s
+        }
+        
+        console.log(`[TRANSLATE] Language: ${currentLang} (${langName}), Session lang: ${s.lang}, Message: "${msg.substring(0, 50)}..."`);
+        const r = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          temperature: 0,
+          messages: [
+            { role:'system', content:`You are a professional translator. Translate the following text to ${langName}. Return ONLY the translation, nothing else. Do not add any explanations or notes.` },
+            { role:'user', content: msg }
+          ]
+        });
+        const translated = (r.choices?.[0]?.message?.content || msg).trim();
+        console.log(`[TRANSLATE] Result: "${translated.substring(0, 50)}..."`);
+        if (translated === msg) {
+          console.warn(`[TRANSLATE] Warning: Translation returned same text!`);
+        }
+        return translated;
+      } catch (e) {
+        const isRateLimit = e.message && (e.message.includes('429') || e.message.includes('rate limit') || e.message.includes('quota'));
+        
+        if (isRateLimit && attempt < maxRetries - 1) {
+          console.warn(`[TRANSLATE] Rate limit hit (attempt ${attempt + 1}), will retry...`);
+          continue; // Retry
+        }
+        
+        // Final attempt failed or non-rate-limit error
+        console.error(`[TRANSLATE] Error for ${langName}:`, e.message);
+        if (isRateLimit) {
+          console.error(`[TRANSLATE] Rate limit exceeded after ${maxRetries} attempts. Returning English.`);
+          return msg; // Return English on persistent rate limit
+        }
+        return msg; // Return original on other errors
       }
-      return translated;
-    } catch (e) {
-      console.error(`[TRANSLATE] Error for ${langName}:`, e.message);
-      // If quota exceeded, return a helpful message in the target language
-      if (e.message && e.message.includes('429') && e.message.includes('quota')) {
-        console.error(`[TRANSLATE] OpenAI quota exceeded. Translation disabled.`);
-        // Return English with a note that translation is unavailable
-        return msg + `\n\n[Note: Translation service temporarily unavailable due to API quota limit. Please check OpenAI billing.]`;
-      }
-      return msg; // Return original on error
     }
+    
+    return msg; // Fallback
   }
 
   function looksLikeASAP(str){ return /\b(asap|as soon as possible|soonest|earliest)\b/i.test(str||''); }
