@@ -1013,8 +1013,7 @@ app.post('/chat', async (req, res) => {
       else { s.timeStr = `${m[1]}:${m[2]} ${m[3].toUpperCase()}`; s.windowText = `${s.dateStr}, ${s.timeStr}`; s.state = 'find'; }
     }
   }
-
-  if (s.state === 'find') {
+  else if (s.state === 'find') {
     // Check if ZIP code is missing
     if (!s.zip || s.zip.trim() === '') {
       say(t('I need your ZIP code to find clinics. What ZIP code should I search near? (5 digits)'));
@@ -1025,83 +1024,84 @@ app.post('/chat', async (req, res) => {
       const clinics = await findClinics(s.zip, specialty, s.symptoms);
       s.clinics = clinics;
 
-        if (!clinics.length) {
-          say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
-          s.state = 'zip';
-        } else {
-      // Check if this is urgent care - handle differently (no appointments)
-      const isUrgentCare = clinics[0]?.isUrgentCare || specialty === 'urgent care';
-      
-      if (isUrgentCare) {
-        // Urgent care doesn't take appointments
-        const best = clinics[0];
-        say(t(`**${best.name}**`));
-        if (best.address) {
-          say(t(`*${best.address}*`));
-        }
-        if (best.openingHours && best.openingHours.length > 0) {
-          say(t(`Hours: ${best.openingHours[0]}`));
-        }
-        say(t(`📍 Walk-in anytime - no appointment needed for urgent care.`));
-        s.state = 'completed';
+      if (!clinics.length) {
+        say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
+        s.state = 'zip';
       } else {
-        // Regular clinic - proceed with appointment booking
-        const best = clinics[0];
-        s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
+        // Check if this is urgent care - handle differently (no appointments)
+        const isUrgentCare = clinics[0]?.isUrgentCare || specialty === 'urgent care';
+        
+        if (isUrgentCare) {
+          // Urgent care doesn't take appointments
+          const best = clinics[0];
+          say(t(`**${best.name}**`));
+          if (best.address) {
+            say(t(`*${best.address}*`));
+          }
+          if (best.openingHours && best.openingHours.length > 0) {
+            say(t(`Hours: ${best.openingHours[0]}`));
+          }
+          say(t(`📍 Walk-in anytime - no appointment needed for urgent care.`));
+          s.state = 'completed';
+        } else {
+          // Regular clinic - proceed with appointment booking
+          const best = clinics[0];
+          s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
 
-        const details = [];
-        
-        // Get specialty display name
-        const specialtyNames = {
-          'dermatologist': 'Dermatology',
-          'dentist': 'Dental',
-          'ophthalmologist': 'Eye Care',
-          'otolaryngologist': 'ENT',
-          'cardiologist': 'Cardiology',
-          'gastroenterologist': 'Gastroenterology',
-          'orthopedic': 'Orthopedics',
-          'urgent care': 'Urgent Care',
-          'psychiatrist': 'Mental Health',
-          'gynecologist': 'Women\'s Health',
-          'pediatrician': 'Pediatrics',
-          'urologist': 'Urology'
-        };
-        const specialtyName = best.isSpecialty && best.specialty 
-          ? specialtyNames[best.specialty] || best.specialty 
-          : 'General Practice';
-        
-        if (best.isSpecialty && best.specialty) {
-          details.push(`Specializes in ${specialtyName}`);
-        }
-        if (best.rating && best.rating >= 4.5) {
-          details.push(`Rating: ${best.rating}/5.0 (Excellent)`);
-        } else if (best.rating && best.rating >= 4.0) {
-          details.push(`Rating: ${best.rating}/5.0 (Good)`);
-        } else if (best.rating && best.rating >= 3.5) {
-          details.push(`Rating: ${best.rating}/5.0`);
-        }
-        if (!best.isSpecialty) {
-          details.push('Closest to your location');
-        }
-        
-        // Add cost estimate if no insurance
-        if (!s.insuranceY && specialty) {
-          const cost = estimateCost(specialty, s.zip);
-          details.push(`Estimated cost: $${cost.min}-$${cost.max} (avg: $${cost.avg})`);
-        }
+          const details = [];
+          
+          // Get specialty display name
+          const specialtyNames = {
+            'dermatologist': 'Dermatology',
+            'dentist': 'Dental',
+            'ophthalmologist': 'Eye Care',
+            'otolaryngologist': 'ENT',
+            'cardiologist': 'Cardiology',
+            'gastroenterologist': 'Gastroenterology',
+            'orthopedic': 'Orthopedics',
+            'urgent care': 'Urgent Care',
+            'psychiatrist': 'Mental Health',
+            'gynecologist': 'Women\'s Health',
+            'pediatrician': 'Pediatrics',
+            'urologist': 'Urology'
+          };
+          const specialtyName = best.isSpecialty && best.specialty 
+            ? specialtyNames[best.specialty] || best.specialty 
+            : 'General Practice';
+          
+          if (best.isSpecialty && best.specialty) {
+            details.push(`Specializes in ${specialtyName}`);
+          }
+          if (best.rating && best.rating >= 4.5) {
+            details.push(`Rating: ${best.rating}/5.0 (Excellent)`);
+          } else if (best.rating && best.rating >= 4.0) {
+            details.push(`Rating: ${best.rating}/5.0 (Good)`);
+          } else if (best.rating && best.rating >= 3.5) {
+            details.push(`Rating: ${best.rating}/5.0`);
+          }
+          if (!best.isSpecialty) {
+            details.push('Closest to your location');
+          }
+          
+          // Add cost estimate if no insurance
+          if (!s.insuranceY && specialty) {
+            const cost = estimateCost(specialty, s.zip);
+            details.push(`Estimated cost: $${cost.min}-$${cost.max} (avg: $${cost.avg})`);
+          }
 
-        say(t(`**${best.name}**`));
-        say(t(`**${specialtyName}**`));
-        if (best.address) {
-          say(t(`${best.address}`));
+          say(t(`**${best.name}**`));
+          say(t(`**${specialtyName}**`));
+          if (best.address) {
+            say(t(`${best.address}`));
+          }
+          if (details.length > 0) {
+            details.forEach(detail => {
+              say(t(`${detail}`));
+            });
+          }
+          say(t(`Book for ${s.windowText}? Reply YES to call now, or type NEXT to see another option.`));
+          s.state = 'confirm_choice';
         }
-        if (details.length > 0) {
-          details.forEach(detail => {
-            say(t(`${detail}`));
-          });
-        }
-        say(t(`Book for ${s.windowText}? Reply YES to call now, or type NEXT to see another option.`));
-        s.state = 'confirm_choice';
       }
     }
   }
@@ -1145,12 +1145,12 @@ app.post('/chat', async (req, res) => {
         say(t(`Book for ${s.windowText}? Reply YES to call, or NEXT for another.`));
       }
     } else if (/^yes\b/i.test(text)) {
-        if (s.state !== 'final_confirm') {
-          // If they said YES but haven't selected an option yet, show options again
-          say(t('Please select an option first. Reply **1**, **2**, or **3** to choose a clinic.'));
-        } else if (!s?.chosenClinic?.phone) {
-          say(t('This clinic does not have a phone number available. Please select a different option (1, 2, or 3).'));
-          s.state = 'confirm_choice';
+      if (s.state !== 'final_confirm') {
+        // If they said YES but haven't selected an option yet, show options again
+        say(t('Please select an option first. Reply **1**, **2**, or **3** to choose a clinic.'));
+      } else if (!s?.chosenClinic?.phone) {
+        say(t('This clinic does not have a phone number available. Please select a different option (1, 2, or 3).'));
+        s.state = 'confirm_choice';
       } else {
         // translate name/reason to English for the call
         const nameEn   = await translateToEnglish(s.patientName, s.lang || 'auto');
@@ -1162,11 +1162,11 @@ app.post('/chat', async (req, res) => {
           reason: reasonEn,
           preferredTimes: [s.windowText],
           clinicName: s.chosenClinic.name,
-          callback: '' // optional: set to user’s mobile if you want SMS status
+          callback: '' // optional: set to user's mobile if you want SMS status
         });
 
         s.state = 'calling';
-        say(t(`Calling ${s.chosenClinic.name} now to book for ${s.windowText}. I’ll confirm here.`));
+        say(t(`Calling ${s.chosenClinic.name} now to book for ${s.windowText}. I'll confirm here.`));
       }
     } else if (/^reset|restart|new$/i.test(text)) {
       s = { state:'start', lang:s.lang }; say(t('Reset. Type NEW to begin.'));
