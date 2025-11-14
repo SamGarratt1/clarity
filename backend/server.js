@@ -1342,9 +1342,9 @@ app.post('/chat/web', async (req, res) => {
               ? specialtyNames[clinic.specialty] || clinic.specialty 
               : 'General Practice';
 
-            // Build reasons why this is a top selection
+            // Build details list
             if (clinic.isSpecialty && clinic.specialty) {
-              reasons.push(`🏥 Specializes in ${specialtyName}`);
+              details.push(`Specializes in ${specialtyName}`);
             }
             if (i === 0 && !clinic.isSpecialty) details.push('Closest to your location');
             if (clinic.rating && clinic.rating >= 4.5) {
