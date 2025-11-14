@@ -21,7 +21,7 @@ const {
   PORT = 10000,
   BRAND_NAME = 'Clarity Health Concierge',
   BRAND_SLOGAN = 'AI appointment assistant',
-  TTS_VOICE = 'Matthew.Joanna-Neural'
+  TTS_VOICE = 'Polly.Matthew-Neural'
 } = process.env;
 
 if (!PUBLIC_BASE_URL) throw new Error('Missing required env var: PUBLIC_BASE_URL');
@@ -568,8 +568,13 @@ app.post('/chat', async (req, res) => {
     callback: '' // optional: fill with a mobile later if you want SMS follow-ups
   };
 
-  // persist language if user changes it
-  if (lang) s.lang = lang;
+  // persist language if user changes it (only if supported)
+  if (validLang) s.lang = validLang;
+  
+  // Ensure existing sessions don't have unsupported languages
+  if (s.lang && !supportedLangs.includes(s.lang)) {
+    s.lang = 'en';
+  }
 
   const LINES = []; // lines to show user (in s.lang language)
   const say = (m) => LINES.push(m);
@@ -717,6 +722,10 @@ app.post('/chat/web', async (req, res) => {
   const { message, source, lang, sessionId } = req.body || {};
   if (!message) return res.status(400).json({ error: 'message required' });
 
+  // Validate and sanitize language - only allow supported languages
+  const supportedLangs = ['en', 'es', 'fr', 'pt'];
+  const validLang = (lang && supportedLangs.includes(lang)) ? lang : 'en';
+
   // Use sessionId from client if provided, otherwise use IP-based session
   // This allows better session persistence across page refreshes
   const from = sessionId ? `web-${sessionId}` : `web-${req.ip || req.headers['x-forwarded-for'] || 'default'}`;
@@ -725,7 +734,7 @@ app.post('/chat/web', async (req, res) => {
   // Reuse the same chat logic
   let s = smsSessions.get(from) || {
     state: 'start',
-    lang: lang || 'en',
+    lang: validLang,
     patientName: '',
     symptoms: '',
     zip: '',
@@ -741,15 +750,23 @@ app.post('/chat/web', async (req, res) => {
 
   // Always update language if provided (for language selector)
   // This ensures language changes are immediately applied to existing sessions
-  if (lang && lang !== s.lang) {
-    console.log(`Language changed from ${s.lang} to ${lang} for session ${from}`);
-    s.lang = lang;
+  // Only update if the language is supported
+  if (validLang && validLang !== s.lang) {
+    console.log(`Language changed from ${s.lang} to ${validLang} for session ${from}`);
+    s.lang = validLang;
     // Save immediately so language persists
     smsSessions.set(from, s);
   }
   
+  // Ensure existing sessions don't have unsupported languages
+  if (s.lang && !supportedLangs.includes(s.lang)) {
+    console.log(`Fixing unsupported language ${s.lang} to 'en' for session ${from}`);
+    s.lang = 'en';
+    smsSessions.set(from, s);
+  }
+  
   // Log current language for debugging
-  console.log(`Current session language: ${s.lang || 'en'} (requested: ${lang || 'none'})`);
+  console.log(`Current session language: ${s.lang || 'en'} (requested: ${lang || 'none'}, validated: ${validLang})`);
 
   const LINES = [];
   const say = (m) => LINES.push(m);
@@ -774,8 +791,9 @@ app.post('/chat/web', async (req, res) => {
   }
   
   // Ensure language is always up to date from the request (double-check after language change message)
-  if (lang && lang !== s.lang) {
-    s.lang = lang;
+  // Only update if the language is supported
+  if (validLang && validLang !== s.lang) {
+    s.lang = validLang;
     smsSessions.set(from, s); // Save immediately
   }
   
@@ -956,8 +974,8 @@ app.post('/chat/web', async (req, res) => {
         s.state = 'confirm_choice';
         say(t('Cancelled. Please select option **1**, **2**, or **3** to choose a clinic.'));
       } else if (/^reset|restart|new$/i.test(text)) {
-        // Preserve language when resetting
-        const preservedLang = s.lang || lang || 'en';
+        // Preserve language when resetting (but ensure it's supported)
+        const preservedLang = (s.lang && supportedLangs.includes(s.lang)) ? s.lang : 'en';
         console.log(`[RESET] Resetting state, preserving language: ${preservedLang}`);
         s = { 
           state:'start', 
