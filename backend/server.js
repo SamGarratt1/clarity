@@ -502,18 +502,37 @@ app.post('/chat/web', async (req, res) => {
   const say = (m) => LINES.push(m);
 
   async function t(msg) {
-    if ((s.lang||'en') === 'en') return msg;
+    const currentLang = s.lang || 'en';
+    // Don't translate if English
+    if (currentLang === 'en') return msg;
+    
+    // Map language codes to full names for better translation
+    const langMap = {
+      'es': 'Spanish',
+      'fr': 'French', 
+      'pt': 'Portuguese',
+      'ar': 'Arabic',
+      'hi': 'Hindi'
+    };
+    const langName = langMap[currentLang] || currentLang;
+    
     try {
+      console.log(`Translating to ${langName} (${currentLang}): "${msg.substring(0, 50)}..."`);
       const r = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         temperature: 0,
         messages: [
-          { role:'system', content:`Translate to ${s.lang}. Return only the translation.` },
+          { role:'system', content:`You are a professional translator. Translate the following text to ${langName}. Return ONLY the translation, nothing else.` },
           { role:'user', content: msg }
         ]
       });
-      return (r.choices?.[0]?.message?.content || msg).trim();
-    } catch { return msg; }
+      const translated = (r.choices?.[0]?.message?.content || msg).trim();
+      console.log(`Translation result: "${translated.substring(0, 50)}..."`);
+      return translated;
+    } catch (e) {
+      console.error(`Translation error for ${langName}:`, e.message);
+      return msg; // Return original on error
+    }
   }
 
   function looksLikeASAP(str){ return /\b(asap|as soon as possible|soonest|earliest)\b/i.test(str||''); }
