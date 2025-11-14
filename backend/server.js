@@ -524,9 +524,10 @@ app.post('/chat/web', async (req, res) => {
     }
   }
   
-  // Ensure language is always up to date from the request
+  // Ensure language is always up to date from the request (double-check after language change message)
   if (lang && lang !== s.lang) {
     s.lang = lang;
+    smsSessions.set(from, s); // Save immediately
   }
   
   // Handle quick actions
