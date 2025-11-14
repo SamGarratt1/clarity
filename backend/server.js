@@ -369,13 +369,40 @@ async function findClinics(zip, specialty = 'clinic') {
       }
     });
 
-    return placesResp.data.results.slice(0, 6).map(p => ({
-      name: p.name,
-      address: p.vicinity || p.formatted_address || '',
-      rating: p.rating || null,
-      location: p.geometry?.location,
-      phone: null // (MVP) requires Place Details
-    }));
+    // Fetch phone numbers using Place Details API
+    const clinicsWithDetails = await Promise.all(
+      placesResp.data.results.slice(0, 10).map(async (p) => {
+        try {
+          const detailsResp = await mapsClient.placeDetails({
+            params: {
+              place_id: p.place_id,
+              fields: ['name', 'formatted_address', 'formatted_phone_number', 'rating', 'geometry'],
+              key: GOOGLE_MAPS_API_KEY
+            }
+          });
+          const details = detailsResp.data.result;
+          return {
+            name: details.name || p.name,
+            address: details.formatted_address || p.vicinity || '',
+            rating: details.rating || p.rating || null,
+            location: details.geometry?.location || p.geometry?.location,
+            phone: details.formatted_phone_number || null
+          };
+        } catch (e) {
+          // If Place Details fails, return basic info without phone
+          return {
+            name: p.name,
+            address: p.vicinity || p.formatted_address || '',
+            rating: p.rating || null,
+            location: p.geometry?.location,
+            phone: null
+          };
+        }
+      })
+    );
+
+    // Filter out clinics without phone numbers
+    return clinicsWithDetails.filter(c => c.phone !== null && c.phone !== undefined);
   } catch (e) {
     console.error('Maps API error:', e.message);
     return [];
@@ -655,18 +682,26 @@ app.post('/chat', async (req, res) => {
     s.clinics = clinics;
 
     if (!clinics.length) {
-      say(t(`I couldn’t find clinics nearby. Please check the ZIP or try a broader area.`));
+      say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
       s.state = 'zip';
     } else {
       // pick the best candidate and explain
       const best = clinics[0];
       s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
 
-      const reason =
-        s.useOwnClinic ? 'your usual clinic preference'
-        : (specialty !== 'clinic' ? `your symptoms indicating ${specialty}` : 'distance and availability');
+      const reasons = [];
+      if (best.rating && best.rating >= 4.5) reasons.push(`⭐ Excellent rating (${best.rating}/5)`);
+      else if (best.rating && best.rating >= 4.0) reasons.push(`⭐ Good rating (${best.rating}/5)`);
+      else if (best.rating && best.rating >= 3.5) reasons.push(`⭐ Rated ${best.rating}/5`);
+      reasons.push('📍 Closest to your location');
 
-      say(t(`Based on ${reason}, I suggest **${best.name}**${best.address?` — ${best.address}`:''}${best.rating?` (rating ${best.rating}/5)`:''}.`));
+      say(t(`**${best.name}**`));
+      if (best.address) {
+        say(t(`*${best.address}*`));
+      }
+      if (reasons.length > 0) {
+        say(t(`• ${reasons.join('\n• ')}`));
+      }
       say(t(`Book for ${s.windowText}? Reply YES to call now, or type NEXT to see another option.`));
       s.state = 'confirm_choice';
     }
@@ -696,7 +731,7 @@ app.post('/chat', async (req, res) => {
           // If they said YES but haven't selected an option yet, show options again
           say(t('Please select an option first. Reply **1**, **2**, or **3** to choose a clinic.'));
         } else if (!s?.chosenClinic?.phone) {
-          say(t('This clinic did not list a phone number via Maps. Please select a different option (1, 2, or 3).'));
+          say(t('This clinic does not have a phone number available. Please select a different option (1, 2, or 3).'));
           s.state = 'confirm_choice';
         } else {
         // translate name/reason to English for the call
@@ -971,7 +1006,8 @@ app.post('/chat/web', async (req, res) => {
         }
       } else if (/^yes\b/i.test(text) && s.state === 'final_confirm') {
         if (!s?.chosenClinic?.phone) {
-          say(t('This clinic did not list a phone number via Maps. Reply NEXT for another option.'));
+          say(t('This clinic does not have a phone number available. Please select a different option (1, 2, or 3).'));
+          s.state = 'confirm_choice';
         } else {
           const nameEn   = await translateToEnglish(s.patientName, s.lang || 'auto');
           const reasonEn = await translateToEnglish(s.symptoms,   s.lang || 'auto');
