@@ -738,7 +738,25 @@ app.post('/chat/web', async (req, res) => {
         s.state = 'confirm_choice';
         say(await t('Cancelled. Please select option **1**, **2**, or **3** to choose a clinic.'));
       } else if (/^reset|restart|new$/i.test(text)) {
-        s = { state:'start', lang:s.lang }; say(await t('Reset. Type NEW to begin.'));
+        // Preserve language when resetting
+        const preservedLang = s.lang || lang || 'en';
+        console.log(`[RESET] Resetting state, preserving language: ${preservedLang}`);
+        s = { 
+          state:'start', 
+          lang: preservedLang,
+          patientName: '',
+          symptoms: '',
+          zip: '',
+          insuranceY: false,
+          dateStr: '',
+          timeStr: '',
+          windowText: '',
+          useOwnClinic: false,
+          clinics: [],
+          chosenClinic: null,
+          callback: ''
+        };
+        say(await t('Reset. Type NEW to begin.'));
       } else {
         if (s.state === 'final_confirm') {
           say(await t('Please reply **YES** to book, **CANCEL** to choose a different option, or **RESET** to start over.'));
