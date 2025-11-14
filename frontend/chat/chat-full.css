@@ -294,6 +294,74 @@ a:hover {
   font-weight: 400;
 }
 
+/* Clinic Options Styling */
+.clinic-option {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin: 1.25rem 0;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+.clinic-option:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15);
+  transform: translateY(-2px);
+}
+
+.clinic-option:first-child {
+  margin-top: 0.5rem;
+}
+
+.clinic-option:last-child {
+  margin-bottom: 0.5rem;
+}
+
+.clinic-name {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0 0 0.75rem 0;
+  line-height: 1.4;
+  background: linear-gradient(135deg, #ffffff 0%, #e2e8f0 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.clinic-address {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0 0 1rem 0;
+  line-height: 1.6;
+  padding-left: 0.5rem;
+  border-left: 2px solid rgba(99, 102, 241, 0.3);
+}
+
+.clinic-reason {
+  font-size: 0.95rem;
+  color: var(--text);
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  background: rgba(99, 102, 241, 0.1);
+  border-radius: 8px;
+  line-height: 1.6;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.clinic-reason:first-of-type {
+  margin-top: 0.75rem;
+}
+
+.clinic-reason:last-of-type {
+  margin-bottom: 0;
+}
+
 @keyframes fadeInUp {
   from {
     opacity: 0;
@@ -503,6 +571,14 @@ a:hover {
 
   .msg {
     max-width: 95%;
+  }
+
+  .clinic-option {
+    padding: 1.25rem;
+  }
+
+  .clinic-name {
+    font-size: 1.2rem;
   }
 
   .chat-input-row {

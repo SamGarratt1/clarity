@@ -21,6 +21,62 @@ function getSessionId() {
   return sessionId;
 }
 
+// Helper: Format clinic options with better styling
+function formatClinicOptions(text) {
+  // Split by double newlines to detect clinic options
+  const parts = text.split(/\n\n+/);
+  let formatted = '';
+  
+  for (let part of parts) {
+    part = part.trim();
+    if (!part) continue;
+    
+    // Check if this looks like a clinic option (starts with **Option)
+    if (/^\*\*Option \d+:/.test(part)) {
+      // This is a clinic option - wrap it in a special container
+      formatted += '<div class="clinic-option">';
+      
+      // Split into lines
+      const lines = part.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
+        if (!line) continue;
+        
+        // Clinic name (bold)
+        if (/^\*\*Option \d+:/.test(line)) {
+          line = line.replace(/\*\*(.*?)\*\*/g, '<h3 class="clinic-name">$1</h3>');
+          formatted += line;
+        }
+        // Address (italic)
+        else if (/^\*.*\*$/.test(line)) {
+          line = line.replace(/\*(.*?)\*/g, '<p class="clinic-address">$1</p>');
+          formatted += line;
+        }
+        // Bullet points (reasons)
+        else if (/^•/.test(line)) {
+          line = line.replace(/^•\s*/, '');
+          formatted += `<div class="clinic-reason">${line}</div>`;
+        }
+        // Regular text
+        else {
+          line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          formatted += `<p>${line}</p>`;
+        }
+      }
+      
+      formatted += '</div>';
+    } else {
+      // Regular message - just format markdown
+      part = part.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      part = part.replace(/\*(.*?)\*/g, '<em>$1</em>');
+      part = part.replace(/^•\s*(.+)$/gm, '<div class="clinic-reason">$1</div>');
+      formatted += part.replace(/\n/g, '<br>');
+    }
+  }
+  
+  return formatted;
+}
+
 // Helper: Add message to chat
 function addMessage(role, text) {
   const msgDiv = document.createElement("div");
@@ -31,10 +87,8 @@ function addMessage(role, text) {
   meta.textContent = role === "assistant" ? "Assistant" : "You";
 
   const body = document.createElement("span");
-  // Handle markdown-style bold (**text**)
-  body.innerHTML = text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
+  // Format clinic options with special styling
+  body.innerHTML = formatClinicOptions(text);
 
   msgDiv.appendChild(meta);
   msgDiv.appendChild(body);
