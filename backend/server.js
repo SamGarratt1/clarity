@@ -1025,10 +1025,10 @@ app.post('/chat', async (req, res) => {
       const clinics = await findClinics(s.zip, specialty, s.symptoms);
       s.clinics = clinics;
 
-      if (!clinics.length) {
-      say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
-      s.state = 'zip';
-    } else {
+        if (!clinics.length) {
+          say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
+          s.state = 'zip';
+        } else {
       // Check if this is urgent care - handle differently (no appointments)
       const isUrgentCare = clinics[0]?.isUrgentCare || specialty === 'urgent care';
       
