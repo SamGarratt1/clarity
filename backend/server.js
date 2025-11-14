@@ -913,8 +913,54 @@ app.post('/chat', async (req, res) => {
 
   function looksLikeASAP(str){ return /\b(asap|as soon as possible|soonest|earliest)\b/i.test(str||''); }
 
-  // state machine
-  if (s.state === 'start' || /^new$/i.test(text)) {
+  // Handle completed and calling states first to prevent loops
+  if (s.state === 'completed') {
+    // Triage is complete - only allow explicit reset
+    if (/^reset|restart|new$/i.test(text)) {
+      const preservedLang = (s.lang && supportedLangs.includes(s.lang)) ? s.lang : 'en';
+      s = { 
+        state:'start', 
+        lang: preservedLang,
+        patientName: '',
+        symptoms: '',
+        zip: '',
+        insuranceY: false,
+        dateStr: '',
+        timeStr: '',
+        windowText: '',
+        useOwnClinic: false,
+        clinics: [],
+        chosenClinic: null,
+        callback: ''
+      };
+      say(t('Reset. Type NEW to begin.'));
+    } else {
+      say(t('Your triage is complete. Type **RESET** or **NEW** to start a new triage.'));
+    }
+  } else if (s.state === 'calling') {
+    // Call is in progress - only allow explicit reset
+    if (/^reset|restart|new$/i.test(text)) {
+      const preservedLang = (s.lang && supportedLangs.includes(s.lang)) ? s.lang : 'en';
+      s = { 
+        state:'start', 
+        lang: preservedLang,
+        patientName: '',
+        symptoms: '',
+        zip: '',
+        insuranceY: false,
+        dateStr: '',
+        timeStr: '',
+        windowText: '',
+        useOwnClinic: false,
+        clinics: [],
+        chosenClinic: null,
+        callback: ''
+      };
+      say(t('Reset. Type NEW to begin.'));
+    } else {
+      say(t('I\'m currently calling the clinic. Please wait for confirmation. Type **RESET** or **NEW** to start over.'));
+    }
+  } else if (s.state === 'start' || /^new$/i.test(text)) {
     s.state = 'name';
       say(t(`Welcome to ${BRAND_NAME} — ${BRAND_SLOGAN}. What is the patient's full name? (First Last)`));
   }
