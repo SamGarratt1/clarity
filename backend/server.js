@@ -983,7 +983,15 @@ app.post('/chat', async (req, res) => {
     else { s.insuranceY = ynToBool(text); s.state = 'clinic_pref'; say(t('Do you want your usual clinic (type "My clinic") or search nearby (type "Nearby")?')); }
   }
   else if (s.state === 'clinic_pref') {
-    s.useOwnClinic = /my clinic/i.test(text);
+    // Handle clinic preference - check for "my clinic" or "nearby"
+    if (/my clinic/i.test(text)) {
+      s.useOwnClinic = true;
+    } else if (/nearby/i.test(text)) {
+      s.useOwnClinic = false;
+    } else {
+      // Default to nearby if unclear
+      s.useOwnClinic = false;
+    }
     s.state = 'date';
     say(t('What date works best? (MM/DD/YYYY). You can also say "ASAP".'));
   }
@@ -1343,7 +1351,15 @@ app.post('/chat/web', async (req, res) => {
       else { s.insuranceY = ynToBool(text); s.state = 'clinic_pref'; say(t('Do you want your usual clinic (type "My clinic") or search nearby (type "Nearby")?')); }
     }
     else if (s.state === 'clinic_pref') {
-      s.useOwnClinic = /my clinic/i.test(text);
+      // Handle clinic preference - check for "my clinic" or "nearby"
+      if (/my clinic/i.test(text)) {
+        s.useOwnClinic = true;
+      } else if (/nearby/i.test(text)) {
+        s.useOwnClinic = false;
+      } else {
+        // Default to nearby if unclear
+        s.useOwnClinic = false;
+      }
       s.state = 'date';
       say(t('What date works best? (MM/DD/YYYY). You can also say "ASAP".'));
     }
