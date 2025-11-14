@@ -1015,12 +1015,17 @@ app.post('/chat', async (req, res) => {
   }
 
   if (s.state === 'find') {
-    // Fetch clinics (own clinic UX can be added later via saved preferences)
-    const specialty = await inferSpecialty(s.symptoms);
-    const clinics = await findClinics(s.zip, specialty, s.symptoms);
-    s.clinics = clinics;
+    // Check if ZIP code is missing
+    if (!s.zip || s.zip.trim() === '') {
+      say(t('I need your ZIP code to find clinics. What ZIP code should I search near? (5 digits)'));
+      s.state = 'zip';
+    } else {
+      // Fetch clinics (own clinic UX can be added later via saved preferences)
+      const specialty = await inferSpecialty(s.symptoms);
+      const clinics = await findClinics(s.zip, specialty, s.symptoms);
+      s.clinics = clinics;
 
-    if (!clinics.length) {
+      if (!clinics.length) {
       say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
       s.state = 'zip';
     } else {
