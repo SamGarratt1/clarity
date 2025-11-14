@@ -342,67 +342,146 @@ async function translateToEnglish(text, sourceLang = 'auto') {
 /* ---------- Maps ---------- */
 function inferSpecialty(symptoms = '') {
   const s = (symptoms||'').toLowerCase();
-  if (/skin|rash|acne|mole|dermat/i.test(s)) return 'dermatologist';
-  if (/tooth|gum|dent/i.test(s)) return 'dentist';
-  if (/eye|vision|ophthalm/i.test(s)) return 'ophthalmologist';
-  if (/throat|ear|nose|sinus|ent/i.test(s)) return 'otolaryngologist';
-  if (/chest pain|shortness|palpit/i.test(s)) return 'cardiologist';
-  if (/stomach|abdomen|nausea|gi|diarrhea|vomit/i.test(s)) return 'gastroenterologist';
-  if (/bone|joint|fracture|ortho/i.test(s)) return 'orthopedic';
-  if (/flu|fever|cough|urgent|injury|stitches|sprain/i.test(s)) return 'urgent care';
-  return 'clinic';
+  // More specific patterns first
+  if (/skin|rash|acne|mole|dermat|eczema|psoriasis|wart/i.test(s)) return 'dermatologist';
+  if (/tooth|teeth|gum|dent|dental|oral|root canal|extraction/i.test(s)) return 'dentist';
+  if (/eye|vision|ophthalm|glasses|contact|retina|glaucoma|cataract/i.test(s)) return 'ophthalmologist';
+  if (/throat|ear|nose|sinus|ent|hearing|tonsil|adenoid/i.test(s)) return 'otolaryngologist';
+  if (/chest pain|shortness|palpit|heart|cardiac|cardio|hypertension|blood pressure/i.test(s)) return 'cardiologist';
+  if (/stomach|abdomen|nausea|gi|diarrhea|vomit|digest|ibs|acid reflux|ulcer/i.test(s)) return 'gastroenterologist';
+  if (/bone|joint|fracture|ortho|knee|hip|shoulder|back pain|spine|arthritis/i.test(s)) return 'orthopedic';
+  if (/flu|fever|cough|urgent|injury|stitches|sprain|emergency|broken/i.test(s)) return 'urgent care';
+  if (/mental|depression|anxiety|therapy|counseling|psych|psychiatrist/i.test(s)) return 'psychiatrist';
+  if (/women|gynec|obgyn|pregnancy|prenatal|pap|mammogram/i.test(s)) return 'gynecologist';
+  if (/child|pediatric|pediatrician|baby|infant|teenager/i.test(s)) return 'pediatrician';
+  return null; // Return null for general issues
 }
 
-async function findClinics(zip, specialty = 'clinic') {
+async function findClinics(zip, specialty = null, symptoms = '') {
   try {
     const geoResp = await mapsClient.geocode({ params: { address: zip, key: GOOGLE_MAPS_API_KEY }});
     if (!geoResp.data.results.length) return [];
     const { lat, lng } = geoResp.data.results[0].geometry.location;
 
-    const placesResp = await mapsClient.placesNearby({
-      params: {
-        location: { lat, lng },
-        radius: 10000,
-        keyword: specialty,
-        type: 'doctor',
-        key: GOOGLE_MAPS_API_KEY
+    let specialtyClinics = [];
+    let generalClinics = [];
+
+    // First, try to find specialty clinics if a specialty was identified
+    if (specialty) {
+      try {
+        const specialtyResp = await mapsClient.placesNearby({
+          params: {
+            location: { lat, lng },
+            radius: 10000,
+            keyword: specialty,
+            type: 'doctor',
+            key: GOOGLE_MAPS_API_KEY
+          }
+        });
+
+        specialtyClinics = await Promise.all(
+          specialtyResp.data.results.slice(0, 10).map(async (p) => {
+            try {
+              const detailsResp = await mapsClient.placeDetails({
+                params: {
+                  place_id: p.place_id,
+                  fields: ['name', 'formatted_address', 'formatted_phone_number', 'rating', 'geometry'],
+                  key: GOOGLE_MAPS_API_KEY
+                }
+              });
+              const details = detailsResp.data.result;
+              return {
+                name: details.name || p.name,
+                address: details.formatted_address || p.vicinity || '',
+                rating: details.rating || p.rating || null,
+                location: details.geometry?.location || p.geometry?.location,
+                phone: details.formatted_phone_number || null,
+                isSpecialty: true,
+                specialty: specialty
+              };
+            } catch (e) {
+              return null;
+            }
+          })
+        );
+        specialtyClinics = specialtyClinics.filter(c => c && c.phone);
+      } catch (e) {
+        console.error('Specialty search error:', e.message);
       }
+    }
+
+    // If we have fewer than 3 specialty clinics, also search for general clinics
+    if (specialtyClinics.length < 3) {
+      try {
+        const generalResp = await mapsClient.placesNearby({
+          params: {
+            location: { lat, lng },
+            radius: 10000,
+            keyword: 'primary care doctor clinic',
+            type: 'doctor',
+            key: GOOGLE_MAPS_API_KEY
+          }
+        });
+
+        generalClinics = await Promise.all(
+          generalResp.data.results.slice(0, 10).map(async (p) => {
+            try {
+              const detailsResp = await mapsClient.placeDetails({
+                params: {
+                  place_id: p.place_id,
+                  fields: ['name', 'formatted_address', 'formatted_phone_number', 'rating', 'geometry'],
+                  key: GOOGLE_MAPS_API_KEY
+                }
+              });
+              const details = detailsResp.data.result;
+              return {
+                name: details.name || p.name,
+                address: details.formatted_address || p.vicinity || '',
+                rating: details.rating || p.rating || null,
+                location: details.geometry?.location || p.geometry?.location,
+                phone: details.formatted_phone_number || null,
+                isSpecialty: false
+              };
+            } catch (e) {
+              return null;
+            }
+          })
+        );
+        generalClinics = generalClinics.filter(c => c && c.phone);
+      } catch (e) {
+        console.error('General search error:', e.message);
+      }
+    }
+
+    // Combine and prioritize: specialty clinics first, then general
+    // Remove duplicates by name
+    const allClinics = [...specialtyClinics];
+    const specialtyNames = new Set(specialtyClinics.map(c => c.name.toLowerCase()));
+    
+    for (const clinic of generalClinics) {
+      if (!specialtyNames.has(clinic.name.toLowerCase())) {
+        allClinics.push(clinic);
+      }
+    }
+
+    // Sort by: specialty first, then by rating (higher first), then by distance
+    allClinics.sort((a, b) => {
+      // Specialty clinics first
+      if (a.isSpecialty && !b.isSpecialty) return -1;
+      if (!a.isSpecialty && b.isSpecialty) return 1;
+      
+      // Then by rating (higher is better)
+      if (a.rating && b.rating) {
+        if (Math.abs(a.rating - b.rating) > 0.1) {
+          return b.rating - a.rating;
+        }
+      } else if (a.rating) return -1;
+      else if (b.rating) return 1;
+      
+      return 0;
     });
 
-    // Fetch phone numbers using Place Details API
-    const clinicsWithDetails = await Promise.all(
-      placesResp.data.results.slice(0, 10).map(async (p) => {
-        try {
-          const detailsResp = await mapsClient.placeDetails({
-            params: {
-              place_id: p.place_id,
-              fields: ['name', 'formatted_address', 'formatted_phone_number', 'rating', 'geometry'],
-              key: GOOGLE_MAPS_API_KEY
-            }
-          });
-          const details = detailsResp.data.result;
-          return {
-            name: details.name || p.name,
-            address: details.formatted_address || p.vicinity || '',
-            rating: details.rating || p.rating || null,
-            location: details.geometry?.location || p.geometry?.location,
-            phone: details.formatted_phone_number || null
-          };
-        } catch (e) {
-          // If Place Details fails, return basic info without phone
-          return {
-            name: p.name,
-            address: p.vicinity || p.formatted_address || '',
-            rating: p.rating || null,
-            location: p.geometry?.location,
-            phone: null
-          };
-        }
-      })
-    );
-
-    // Filter out clinics without phone numbers
-    return clinicsWithDetails.filter(c => c.phone !== null && c.phone !== undefined);
+    return allClinics.slice(0, 10); // Return top 10
   } catch (e) {
     console.error('Maps API error:', e.message);
     return [];
@@ -678,7 +757,7 @@ app.post('/chat', async (req, res) => {
   if (s.state === 'find') {
     // Fetch clinics (own clinic UX can be added later via saved preferences)
     const specialty = inferSpecialty(s.symptoms);
-    const clinics = await findClinics(s.zip, specialty);
+    const clinics = await findClinics(s.zip, specialty, s.symptoms);
     s.clinics = clinics;
 
     if (!clinics.length) {
@@ -690,10 +769,27 @@ app.post('/chat', async (req, res) => {
       s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
 
       const reasons = [];
+      if (best.isSpecialty && best.specialty) {
+        const specialtyNames = {
+          'dermatologist': 'Dermatology',
+          'dentist': 'Dental',
+          'ophthalmologist': 'Eye Care',
+          'otolaryngologist': 'ENT',
+          'cardiologist': 'Cardiology',
+          'gastroenterologist': 'Gastroenterology',
+          'orthopedic': 'Orthopedics',
+          'urgent care': 'Urgent Care',
+          'psychiatrist': 'Mental Health',
+          'gynecologist': 'Women\'s Health',
+          'pediatrician': 'Pediatrics'
+        };
+        const specialtyName = specialtyNames[best.specialty] || best.specialty;
+        reasons.push(`🏥 Specializes in ${specialtyName}`);
+      }
       if (best.rating && best.rating >= 4.5) reasons.push(`⭐ Excellent rating (${best.rating}/5)`);
       else if (best.rating && best.rating >= 4.0) reasons.push(`⭐ Good rating (${best.rating}/5)`);
       else if (best.rating && best.rating >= 3.5) reasons.push(`⭐ Rated ${best.rating}/5`);
-      reasons.push('📍 Closest to your location');
+      if (!best.isSpecialty) reasons.push('📍 Closest to your location');
 
       say(t(`**${best.name}**`));
       if (best.address) {
@@ -917,7 +1013,7 @@ app.post('/chat/web', async (req, res) => {
 
     if (s.state === 'find') {
       const specialty = inferSpecialty(s.symptoms);
-      const clinics = await findClinics(s.zip, specialty);
+      const clinics = await findClinics(s.zip, specialty, s.symptoms);
       s.clinics = clinics;
 
       if (!clinics.length) {
@@ -936,7 +1032,24 @@ app.post('/chat/web', async (req, res) => {
           const reasons = [];
 
           // Build reasons why this is a top selection
-          if (i === 0) reasons.push('📍 Closest to your location');
+          if (clinic.isSpecialty && clinic.specialty) {
+            const specialtyNames = {
+              'dermatologist': 'Dermatology',
+              'dentist': 'Dental',
+              'ophthalmologist': 'Eye Care',
+              'otolaryngologist': 'ENT',
+              'cardiologist': 'Cardiology',
+              'gastroenterologist': 'Gastroenterology',
+              'orthopedic': 'Orthopedics',
+              'urgent care': 'Urgent Care',
+              'psychiatrist': 'Mental Health',
+              'gynecologist': 'Women\'s Health',
+              'pediatrician': 'Pediatrics'
+            };
+            const specialtyName = specialtyNames[clinic.specialty] || clinic.specialty;
+            reasons.push(`🏥 Specializes in ${specialtyName}`);
+          }
+          if (i === 0 && !clinic.isSpecialty) reasons.push('📍 Closest to your location');
           if (clinic.rating && clinic.rating >= 4.5) reasons.push(`⭐ Excellent rating (${clinic.rating}/5)`);
           else if (clinic.rating && clinic.rating >= 4.0) reasons.push(`⭐ Good rating (${clinic.rating}/5)`);
           else if (clinic.rating && clinic.rating >= 3.5) reasons.push(`⭐ Rated ${clinic.rating}/5`);
