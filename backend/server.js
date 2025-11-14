@@ -489,10 +489,14 @@ app.post('/chat/web', async (req, res) => {
   // Always update language if provided (for language selector)
   // This ensures language changes are immediately applied to existing sessions
   if (lang && lang !== s.lang) {
+    console.log(`Language changed from ${s.lang} to ${lang} for session ${from}`);
     s.lang = lang;
     // Save immediately so language persists
     smsSessions.set(from, s);
   }
+  
+  // Log current language for debugging
+  console.log(`Current session language: ${s.lang || 'en'} (requested: ${lang || 'none'})`);
 
   const LINES = [];
   const say = (m) => LINES.push(m);
