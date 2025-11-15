@@ -539,8 +539,11 @@ function getCostRating(specialty, zip) {
 }
 
 async function findClinics(zip, specialty = null, symptoms = '') {
+  console.log(`[findClinics] Searching for clinics. ZIP: ${zip}, Specialty: ${specialty || 'none'}, Symptoms: "${symptoms}"`);
+  
   // Handle urgent care specially - they don't take appointments
   if (specialty === 'urgent care') {
+    console.log(`[findClinics] Urgent care requested, using findUrgentCare`);
     return await findUrgentCare(zip);
   }
   try {
@@ -553,6 +556,7 @@ async function findClinics(zip, specialty = null, symptoms = '') {
 
     // First, try to find specialty clinics if a specialty was identified
     if (specialty) {
+      console.log(`[findClinics] Searching for specialty clinics: ${specialty}`);
       try {
         // Use better keywords for Google Maps search
         const specialtyKeywords = {
@@ -637,9 +641,12 @@ async function findClinics(zip, specialty = null, symptoms = '') {
           })
         );
         specialtyClinics = specialtyClinics.filter(c => c && c.phone);
+        console.log(`[findClinics] Found ${specialtyClinics.length} specialty clinics for ${specialty}`);
       } catch (e) {
-        console.error('Specialty search error:', e.message);
+        console.error('[findClinics] Specialty search error:', e.message);
       }
+    } else {
+      console.log(`[findClinics] No specialty provided, will search for general clinics only`);
     }
 
     // If we have fewer than 3 specialty clinics, also search for general clinics
@@ -680,14 +687,16 @@ async function findClinics(zip, specialty = null, symptoms = '') {
           })
         );
         generalClinics = generalClinics.filter(c => c && c.phone);
+        console.log(`[findClinics] Found ${generalClinics.length} general clinics`);
       } catch (e) {
-        console.error('General search error:', e.message);
+        console.error('[findClinics] General search error:', e.message);
       }
     }
 
     // Combine and prioritize: specialty clinics first, then general
     // Remove duplicates by name
     const allClinics = [...specialtyClinics];
+    console.log(`[findClinics] Total clinics found: ${specialtyClinics.length} specialty + ${generalClinics.length} general = ${allClinics.length} before deduplication`);
     const specialtyNames = new Set(specialtyClinics.map(c => c.name.toLowerCase()));
     
     for (const clinic of generalClinics) {
@@ -713,9 +722,11 @@ async function findClinics(zip, specialty = null, symptoms = '') {
       return 0;
     });
 
-    return allClinics.slice(0, 10); // Return top 10
+    const finalClinics = allClinics.slice(0, 10); // Return top 10
+    console.log(`[findClinics] Returning ${finalClinics.length} clinics. Specialty breakdown: ${finalClinics.filter(c => c.isSpecialty).length} specialty, ${finalClinics.filter(c => !c.isSpecialty).length} general`);
+    return finalClinics;
   } catch (e) {
-    console.error('Maps API error:', e.message);
+    console.error('[findClinics] Maps API error:', e.message);
     return [];
   }
 }
@@ -1112,10 +1123,13 @@ app.post('/chat', async (req, res) => {
       say(t('I already found clinics for you. Please select an option or type RESET to start over.'));
     } else {
       // Fetch clinics (own clinic UX can be added later via saved preferences)
+      console.log(`[chat] Inferring specialty from symptoms: "${s.symptoms}"`);
       const specialty = await inferSpecialty(s.symptoms);
+      console.log(`[chat] Inferred specialty: ${specialty || 'null'} for symptoms: "${s.symptoms}"`);
       s.inferredSpecialty = specialty; // Store for later use in cost rating
       const clinics = await findClinics(s.zip, specialty, s.symptoms);
       s.clinics = clinics;
+      console.log(`[chat] Found ${clinics.length} clinics. First clinic: ${clinics[0]?.name || 'none'}, Specialty: ${clinics[0]?.specialty || 'none'}`);
 
       if (!clinics.length) {
         say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
