@@ -403,7 +403,16 @@ What specialty should treat this? Return only the specialty name or "null".`
     console.warn(`AI returned unexpected specialty: "${result}" (cleaned: "${cleaned}") for symptoms: "${s}"`);
     return null;
   } catch (e) {
-    console.error('Error inferring specialty:', e.message);
+    console.error('Error inferring specialty:', e.message, e.status, e.code);
+    // Log more details if it's an API error
+    if (e.status) {
+      console.error('OpenAI API error details:', {
+        status: e.status,
+        code: e.code,
+        message: e.message,
+        type: e.type
+      });
+    }
     // Fallback to null on error
     return null;
   }
@@ -705,12 +714,18 @@ async function nextAIUtterance(callSid) {
     { role: 'system', content: buildSystemPrompt(session.userRequest) },
     ...lastTurns.map(t => ({ role: t.from === 'ai' ? 'assistant' : 'user', content: t.text }))
   ];
-  const resp = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    temperature: 0.3,
-    messages
-  });
-  return resp.choices[0].message.content.trim();
+  try {
+    const resp = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.3,
+      messages
+    });
+    return resp.choices[0].message.content.trim();
+  } catch (e) {
+    console.error('Error in nextAIUtterance:', e.message, e.status, e.code);
+    // Return a fallback response
+    return 'Could you share a day and time that works?';
+  }
 }
 
 /* ---------- Call helpers ---------- */
@@ -895,20 +910,11 @@ app.post('/chat', async (req, res) => {
   const LINES = []; // lines to show user (in s.lang language)
   const say = (m) => LINES.push(m);
 
-  // Simple translator to patient language for UI prompts
-  async function t(msg) {
-    if ((s.lang||'en') === 'en') return msg;
-    try {
-      const r = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        temperature: 0,
-        messages: [
-          { role:'system', content:`Translate to ${s.lang}. Return only the translation.` },
-          { role:'user', content: msg }
-        ]
-      });
-      return (r.choices?.[0]?.message?.content || msg).trim();
-    } catch { return msg; }
+  // Simple synchronous translation using dictionary (no API calls)
+  function t(msg) {
+    if (!msg || msg.trim().length === 0) return msg;
+    const currentLang = s.lang || 'en';
+    return translateText(msg, currentLang);
   }
 
   function looksLikeASAP(str){ return /\b(asap|as soon as possible|soonest|earliest)\b/i.test(str||''); }
