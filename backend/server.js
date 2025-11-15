@@ -1350,7 +1350,9 @@ app.post('/chat/web', async (req, res) => {
       } else {
         say(t('I\'m currently calling the clinic. Please wait for confirmation. Type **RESET** or **NEW** to start over.'));
       }
-    } else if (s.state === 'start' || /^new$/i.test(text)) {
+    } else if (s.state === 'start' || (s.state !== 'completed' && s.state !== 'calling' && /^(new|start|begin)$/i.test(text.trim()))) {
+      // Only allow explicit "new", "start", or "begin" commands to reset if not in completed or calling state
+      // Use trim() and exact match to avoid matching words like "New York" or "new patient"
       console.log(`[NEW] Starting new conversation. Current language: ${s.lang || 'en'}, Request lang: ${lang || 'none'}`);
       s.state = 'name';
       const welcomeMsg = `Welcome to ${BRAND_NAME} — ${BRAND_SLOGAN}. What is the patient's full name? (First Last)`;
@@ -1408,8 +1410,7 @@ app.post('/chat/web', async (req, res) => {
         else { s.timeStr = `${m[1]}:${m[2]} ${m[3].toUpperCase()}`; s.windowText = `${s.dateStr}, ${s.timeStr}`; s.state = 'find'; }
       }
     }
-
-    if (s.state === 'find') {
+    else if (s.state === 'find') {
       // Check if clinics already found to avoid duplicate API calls
       if (s.clinics && s.clinics.length > 0) {
         say(t('I already found clinics for you. Please select an option or type RESET to start over.'));
@@ -1656,9 +1657,18 @@ app.post('/chat/web', async (req, res) => {
           say(t('Please reply with option number (**1**, **2**, or **3**) to select, **NEXT** for more options, or **RESET** to start over.'));
         }
       }
+    } else {
+      // Catch-all: if we're in an unexpected state or input doesn't match any handler,
+      // provide helpful feedback based on current state
+      console.warn(`[WARNING] Unhandled state or input. State: ${s.state}, Input: "${text}"`);
+      if (s.state && s.state !== 'start' && s.state !== 'completed' && s.state !== 'calling') {
+        // We're in a valid state but input didn't match - ask user to try again
+        say(t('I didn\'t understand that. Please try again or type RESET to start over.'));
+      }
     }
   }
 
+  // Always save the session at the end, regardless of what happened
   smsSessions.set(from, s);
   
   // Combine all lines into a single reply for web UI
