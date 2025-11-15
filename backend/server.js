@@ -468,6 +468,16 @@ function estimateCost(specialty, zip) {
   return cost;
 }
 
+// Convert cost to $/$$/$$$ rating
+// $ = inexpensive (< $200), $$ = moderate ($200-$350), $$$ = expensive (> $350)
+function getCostRating(specialty, zip) {
+  if (!specialty) return '';
+  const cost = estimateCost(specialty, zip);
+  if (cost.avg < 200) return '$';
+  if (cost.avg <= 350) return '$$';
+  return '$$$';
+}
+
 async function findClinics(zip, specialty = null, symptoms = '') {
   // Handle urgent care specially - they don't take appointments
   if (specialty === 'urgent care') {
@@ -1043,6 +1053,7 @@ app.post('/chat', async (req, res) => {
     } else {
       // Fetch clinics (own clinic UX can be added later via saved preferences)
       const specialty = await inferSpecialty(s.symptoms);
+      s.inferredSpecialty = specialty; // Store for later use in cost rating
       const clinics = await findClinics(s.zip, specialty, s.symptoms);
       s.clinics = clinics;
 
@@ -1091,35 +1102,17 @@ app.post('/chat', async (req, res) => {
             ? specialtyNames[best.specialty] || best.specialty 
             : 'General Practice';
           
-          if (best.isSpecialty && best.specialty) {
-            details.push(`Specializes in ${specialtyName}`);
-          }
-          if (best.rating && best.rating >= 4.5) {
-            details.push(`Rating: ${best.rating}/5.0 (Excellent)`);
-          } else if (best.rating && best.rating >= 4.0) {
-            details.push(`Rating: ${best.rating}/5.0 (Good)`);
-          } else if (best.rating && best.rating >= 3.5) {
-            details.push(`Rating: ${best.rating}/5.0`);
-          }
-          if (!best.isSpecialty) {
-            details.push('Closest to your location');
-          }
+          // Get cost rating (use stored specialty from session)
+          const costRating = !s.insuranceY && s.inferredSpecialty ? getCostRating(s.inferredSpecialty, s.zip) : '';
           
-          // Add cost estimate if no insurance
-          if (!s.insuranceY && specialty) {
-            const cost = estimateCost(specialty, s.zip);
-            details.push(`Estimated cost: $${cost.min}-$${cost.max} (avg: $${cost.avg})`);
+          let clinicLine = `**${best.name}**`;
+          clinicLine += ` | ${specialtyName}`;
+          if (costRating) {
+            clinicLine += ` | ${costRating}`;
           }
-
-          say(t(`**${best.name}**`));
-          say(t(`**${specialtyName}**`));
+          say(t(clinicLine));
           if (best.address) {
-            say(t(`${best.address}`));
-          }
-          if (details.length > 0) {
-            details.forEach(detail => {
-              say(t(`${detail}`));
-            });
+            say(t(best.address));
           }
           say(t(`Book for ${s.windowText}? Reply YES to call now, or type NEXT to see another option.`));
           s.state = 'confirm_choice';
@@ -1155,14 +1148,17 @@ app.post('/chat', async (req, res) => {
           ? specialtyNames[nxt.specialty] || nxt.specialty 
           : 'General Practice';
         
-        if (nxt.rating && nxt.rating >= 4.0) reasons.push(`⭐ ${t('rating')}: ${nxt.rating}/5`);
+        // Get cost rating
+        const costRating = !s.insuranceY && s.inferredSpecialty ? getCostRating(s.inferredSpecialty, s.zip) : '';
         
-        say(t(`**${nxt.name} — ${specialtyName}**`));
-        if (nxt.address) {
-          say(t(`*${nxt.address}*`));
+        let clinicLine = `**${nxt.name}**`;
+        clinicLine += ` | ${specialtyName}`;
+        if (costRating) {
+          clinicLine += ` | ${costRating}`;
         }
-        if (reasons.length > 0) {
-          say(t(`• ${reasons.join('\n• ')}`));
+        say(t(clinicLine));
+        if (nxt.address) {
+          say(t(nxt.address));
         }
         say(t(`Book for ${s.windowText}? Reply YES to call, or NEXT for another.`));
       }
@@ -1416,6 +1412,7 @@ app.post('/chat/web', async (req, res) => {
         say(t('I already found clinics for you. Please select an option or type RESET to start over.'));
       } else {
         const specialty = await inferSpecialty(s.symptoms);
+        s.inferredSpecialty = specialty; // Store for later use in cost rating
         const clinics = await findClinics(s.zip, specialty, s.symptoms);
         s.clinics = clinics;
 
@@ -1461,8 +1458,6 @@ app.post('/chat/web', async (req, res) => {
 
             for (let i = 0; i < topClinics.length; i++) {
               const clinic = topClinics[i];
-              const reasons = [];
-              const details = []; // Initialize details array for each clinic
 
               // Get specialty display name
               const specialtyNames = {
@@ -1483,40 +1478,21 @@ app.post('/chat/web', async (req, res) => {
                 ? specialtyNames[clinic.specialty] || clinic.specialty 
                 : 'General Practice';
 
-              // Build details list
-              if (clinic.isSpecialty && clinic.specialty) {
-                details.push(`Specializes in ${specialtyName}`);
-              }
-              if (i === 0 && !clinic.isSpecialty) details.push('Closest to your location');
-              if (clinic.rating && clinic.rating >= 4.5) {
-                details.push(`Rating: ${clinic.rating}/5.0 (Excellent)`);
-              } else if (clinic.rating && clinic.rating >= 4.0) {
-                details.push(`Rating: ${clinic.rating}/5.0 (Good)`);
-              } else if (clinic.rating && clinic.rating >= 3.5) {
-                details.push(`Rating: ${clinic.rating}/5.0`);
-              }
-              
-              // Add cost estimate if no insurance
-              if (!s.insuranceY && specialty) {
-                const cost = estimateCost(specialty, s.zip);
-                details.push(`Estimated cost: $${cost.min}-$${cost.max} (avg: $${cost.avg})`);
-              }
+              // Get cost rating
+              const costRating = !s.insuranceY && specialty ? getCostRating(specialty, s.zip) : '';
 
               const clinicNum = i + 1;
-              // Clinic name - larger heading
-              say(t(`**OPTION ${clinicNum}: ${clinic.name}**`));
-              say(t(`**${specialtyName}**`));
+              // Format: Option X: Clinic Name | Specialty | Cost Rating
+              let optionLine = `**Option ${clinicNum}: ${clinic.name}**`;
+              optionLine += ` | ${specialtyName}`;
+              if (costRating) {
+                optionLine += ` | ${costRating}`;
+              }
+              say(t(optionLine));
               
               // Address
               if (clinic.address) {
-                say(t(`${clinic.address}`));
-              }
-              
-              // Details list
-              if (details.length > 0) {
-                details.forEach(detail => {
-                  say(t(`${detail}`));
-                });
+                say(t(clinic.address));
               }
               
               say(t('')); // Empty line between options
@@ -1555,7 +1531,13 @@ app.post('/chat/web', async (req, res) => {
           const specialtyName = selected.isSpecialty && selected.specialty 
             ? specialtyNames[selected.specialty] || selected.specialty 
             : 'General Practice';
-          say(t(`Great! You selected **Option ${selectedNum}: ${selected.name} — ${specialtyName}**.`));
+          const costRating = !s.insuranceY && s.inferredSpecialty ? getCostRating(s.inferredSpecialty, s.zip) : '';
+          let confirmLine = `Great! You selected **${selected.name}** | ${specialtyName}`;
+          if (costRating) {
+            confirmLine += ` | ${costRating}`;
+          }
+          confirmLine += '.';
+          say(t(confirmLine));
           say(t(`Book for ${s.windowText}? Reply **YES** to call now, or **CANCEL** to choose a different option.`));
           s.state = 'final_confirm';
         } else {
@@ -1574,7 +1556,6 @@ app.post('/chat/web', async (req, res) => {
           for (let i = 0; i < Math.min(3, remaining.length); i++) {
             const clinic = remaining[i];
             const optionNum = shownCount + i + 1;
-            const reasons = [];
             
             // Get specialty display name
             const specialtyNames = {
@@ -1594,14 +1575,17 @@ app.post('/chat/web', async (req, res) => {
               ? specialtyNames[clinic.specialty] || clinic.specialty 
               : 'General Practice';
             
-            if (clinic.rating && clinic.rating >= 4.0) reasons.push(`⭐ ${t('rating')}: ${clinic.rating}/5`);
+            // Get cost rating
+            const costRating = !s.insuranceY && s.inferredSpecialty ? getCostRating(s.inferredSpecialty, s.zip) : '';
             
-            say(t(`**Option ${optionNum}: ${clinic.name} — ${specialtyName}**`));
-            if (clinic.address) {
-              say(t(`*${clinic.address}*`));
+            let optionLine = `**Option ${optionNum}: ${clinic.name}**`;
+            optionLine += ` | ${specialtyName}`;
+            if (costRating) {
+              optionLine += ` | ${costRating}`;
             }
-            if (reasons.length > 0) {
-              say(t(`• ${reasons.join('\n• ')}`));
+            say(t(optionLine));
+            if (clinic.address) {
+              say(t(clinic.address));
             }
             say(t('')); // Empty line between options
           }
