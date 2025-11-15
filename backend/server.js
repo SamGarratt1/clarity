@@ -731,6 +731,103 @@ async function findClinics(zip, specialty = null, symptoms = '') {
   }
 }
 
+// Use AI to intelligently rank and select the best clinics based on symptoms
+async function rankClinicsBySymptoms(clinics, symptoms, specialty, zip) {
+  if (!clinics || clinics.length === 0) return clinics;
+  if (clinics.length <= 3) return clinics; // No need to rank if 3 or fewer
+  
+  try {
+    console.log(`[rankClinicsBySymptoms] Ranking ${clinics.length} clinics for symptoms: "${symptoms}", specialty: ${specialty || 'none'}`);
+    
+    // Prepare clinic data for AI analysis
+    const clinicData = clinics.slice(0, 15).map((clinic, idx) => ({
+      index: idx,
+      name: clinic.name,
+      address: clinic.address,
+      rating: clinic.rating || 'N/A',
+      isSpecialty: clinic.isSpecialty,
+      specialty: clinic.specialty || 'general'
+    }));
+    
+    const resp = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'system',
+          content: `You are a medical concierge assistant. Your job is to analyze patient symptoms and rank clinics to find the BEST matches.
+
+Given the patient's symptoms and a list of clinics, rank the clinics from BEST to WORST match based on:
+1. Relevance to the specific symptoms (most important)
+2. Specialty match (specialty clinics are better than general for specific conditions)
+3. Quality (rating)
+4. Proximity (all are in the same ZIP area, so less important)
+
+Return ONLY a JSON array of clinic indices (0-based) in order of best to worst match.
+Example: [2, 0, 5, 1, 3, 4] means clinic at index 2 is best, then 0, then 5, etc.
+
+Return ONLY the JSON array, nothing else.`
+        },
+        {
+          role: 'user',
+          content: `Patient symptoms: "${symptoms}"
+Inferred specialty: ${specialty || 'none'}
+ZIP code: ${zip}
+
+Available clinics:
+${JSON.stringify(clinicData, null, 2)}
+
+Rank these clinics from BEST to WORST match for the patient's symptoms. Return ONLY a JSON array of indices like [2, 0, 5, 1, 3, 4].`
+        }
+      ]
+    });
+    
+    const result = resp.choices?.[0]?.message?.content || '';
+    console.log(`[rankClinicsBySymptoms] AI ranking response: ${result}`);
+    
+    // Parse the JSON array
+    let rankedIndices = [];
+    try {
+      // Extract JSON array from response (handle cases where AI adds extra text)
+      const jsonMatch = result.match(/\[[\d\s,]+\]/);
+      if (jsonMatch) {
+        rankedIndices = JSON.parse(jsonMatch[0]);
+      }
+    } catch (e) {
+      console.warn(`[rankClinicsBySymptoms] Failed to parse AI ranking, using original order: ${e.message}`);
+      return clinics.slice(0, 3);
+    }
+    
+    // Validate indices
+    if (!Array.isArray(rankedIndices) || rankedIndices.length === 0) {
+      console.warn(`[rankClinicsBySymptoms] Invalid ranking format, using original order`);
+      return clinics.slice(0, 3);
+    }
+    
+    // Reorder clinics based on AI ranking
+    const rankedClinics = rankedIndices
+      .filter(idx => idx >= 0 && idx < clinics.length)
+      .map(idx => clinics[idx])
+      .filter(c => c); // Remove any undefined entries
+    
+    // Take top 3, or fill with remaining if less than 3
+    const finalRanked = rankedClinics.slice(0, 3);
+    if (finalRanked.length < 3) {
+      // Add remaining clinics that weren't ranked
+      const rankedSet = new Set(rankedIndices);
+      const remaining = clinics.filter((_, idx) => !rankedSet.has(idx));
+      finalRanked.push(...remaining.slice(0, 3 - finalRanked.length));
+    }
+    
+    console.log(`[rankClinicsBySymptoms] Ranked clinics: ${finalRanked.map(c => c.name).join(', ')}`);
+    return finalRanked;
+  } catch (e) {
+    console.error('[rankClinicsBySymptoms] Error ranking clinics:', e.message);
+    // Fallback to original order
+    return clinics.slice(0, 3);
+  }
+}
+
 // Special function for urgent care - they don't take appointments
 async function findUrgentCare(zip) {
   try {
@@ -1127,20 +1224,24 @@ app.post('/chat', async (req, res) => {
       const specialty = await inferSpecialty(s.symptoms);
       console.log(`[chat] Inferred specialty: ${specialty || 'null'} for symptoms: "${s.symptoms}"`);
       s.inferredSpecialty = specialty; // Store for later use in cost rating
-      const clinics = await findClinics(s.zip, specialty, s.symptoms);
-      s.clinics = clinics;
-      console.log(`[chat] Found ${clinics.length} clinics. First clinic: ${clinics[0]?.name || 'none'}, Specialty: ${clinics[0]?.specialty || 'none'}`);
+      const allClinics = await findClinics(s.zip, specialty, s.symptoms);
+      console.log(`[chat] Found ${allClinics.length} clinics. First clinic: ${allClinics[0]?.name || 'none'}, Specialty: ${allClinics[0]?.specialty || 'none'}`);
+      
+      // Use AI to intelligently rank and select the best clinics for these specific symptoms
+      const rankedClinics = await rankClinicsBySymptoms(allClinics, s.symptoms, specialty, s.zip);
+      s.clinics = rankedClinics; // Store ranked clinics
+      console.log(`[chat] AI-ranked top clinics: ${rankedClinics.map(c => c.name).join(', ')}`);
 
-      if (!clinics.length) {
+      if (!rankedClinics.length) {
         say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
         s.state = 'zip';
       } else {
         // Check if this is urgent care - handle differently (no appointments)
-        const isUrgentCare = clinics[0]?.isUrgentCare || specialty === 'urgent care';
+        const isUrgentCare = rankedClinics[0]?.isUrgentCare || specialty === 'urgent care';
         
         if (isUrgentCare) {
           // Urgent care doesn't take appointments
-          const best = clinics[0];
+          const best = rankedClinics[0];
           say(t(`**${best.name}**`));
           if (best.address) {
             say(t(`*${best.address}*`));
@@ -1151,8 +1252,8 @@ app.post('/chat', async (req, res) => {
           say(t(`📍 Walk-in anytime - no appointment needed for urgent care.`));
           s.state = 'completed';
         } else {
-          // Regular clinic - proceed with appointment booking
-          const best = clinics[0];
+          // Regular clinic - proceed with appointment booking (already AI-ranked)
+          const best = rankedClinics[0];
           s.chosenClinic = { name: best.name, phone: best.phone, address: best.address, rating: best.rating };
 
           const details = [];
@@ -1487,20 +1588,24 @@ app.post('/chat/web', async (req, res) => {
       } else {
         const specialty = await inferSpecialty(s.symptoms);
         s.inferredSpecialty = specialty; // Store for later use in cost rating
-        const clinics = await findClinics(s.zip, specialty, s.symptoms);
-        s.clinics = clinics;
+        const allClinics = await findClinics(s.zip, specialty, s.symptoms);
+        
+        // Use AI to intelligently rank and select the best clinics for these specific symptoms
+        const rankedClinics = await rankClinicsBySymptoms(allClinics, s.symptoms, specialty, s.zip);
+        s.clinics = rankedClinics; // Store ranked clinics
+        console.log(`[chat/web] AI-ranked top clinics: ${rankedClinics.map(c => c.name).join(', ')}`);
 
-        if (!clinics.length) {
+        if (!rankedClinics.length) {
           say(t(`I couldn't find clinics nearby with phone numbers. Please check the ZIP or try a broader area.`));
           s.state = 'zip';
         } else {
           // Check if this is urgent care - handle differently (no appointments)
-          const isUrgentCare = clinics[0]?.isUrgentCare || specialty === 'urgent care';
+          const isUrgentCare = rankedClinics[0]?.isUrgentCare || specialty === 'urgent care';
           
           if (isUrgentCare) {
             // Urgent care doesn't take appointments - just provide address and hours
-            const topUrgentCare = clinics.slice(0, 3);
-            say(t(`I found ${clinics.length} urgent care location${clinics.length > 1 ? 's' : ''} near you. These are walk-in clinics - no appointment needed:`));
+            const topUrgentCare = rankedClinics.slice(0, 3);
+            say(t(`I found ${rankedClinics.length} urgent care location${rankedClinics.length > 1 ? 's' : ''} near you. These are walk-in clinics - no appointment needed:`));
             say(t('')); // Empty line for spacing
 
             for (let i = 0; i < topUrgentCare.length; i++) {
@@ -1523,11 +1628,11 @@ app.post('/chat/web', async (req, res) => {
             say(t(`You can visit any of these locations anytime during their hours. No appointment needed for urgent care.`));
             s.state = 'completed';
           } else {
-            // Regular clinics - show options for appointment booking
-            const topClinics = clinics.slice(0, 3);
+            // Regular clinics - show options for appointment booking (already AI-ranked)
+            const topClinics = rankedClinics.slice(0, 3);
             s.chosenClinic = { name: topClinics[0].name, phone: topClinics[0].phone, address: topClinics[0].address, rating: topClinics[0].rating };
 
-            say(t(`I found ${clinics.length} clinic${clinics.length > 1 ? 's' : ''} near you. Here are the top options:`));
+            say(t(`I found ${rankedClinics.length} clinic${rankedClinics.length > 1 ? 's' : ''} near you. Here are the top options:`));
             say(t('')); // Empty line for spacing
 
             for (let i = 0; i < topClinics.length; i++) {
