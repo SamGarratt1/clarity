@@ -354,44 +354,91 @@ async function inferSpecialty(symptoms = '') {
   }
   
   try {
+    console.log(`[inferSpecialty] Analyzing symptoms: "${s}"`);
     const resp = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      temperature: 0,
+      temperature: 0.1, // Slightly increase temperature for more nuanced analysis
       messages: [
         {
           role: 'system',
-          content: `You are an expert medical triage assistant. Analyze the patient's symptoms carefully and determine the most appropriate medical specialty. Think step by step about what type of doctor would best address these symptoms.
+          content: `You are an expert medical triage assistant. Your job is to analyze patient symptoms and determine the MOST APPROPRIATE medical specialty. Be specific and accurate.
 
-IMPORTANT RULES:
-1. Mental/psychological symptoms → psychiatrist (depression, anxiety, sadness, mental health, therapy, counseling, bipolar, PTSD, trauma, panic attacks, OCD, suicidal thoughts, mood disorders)
-2. Skin issues → dermatologist (rash, acne, moles, skin problems, eczema, psoriasis, warts, dermatitis, skin cancer concerns)
-3. Teeth/oral → dentist (tooth pain, dental, gum problems, oral health, root canal, extraction, braces)
-4. Eyes/vision → ophthalmologist (eye problems, vision issues, eye pain, glasses, contacts, eye exam, cataracts, glaucoma)
-5. Ear/nose/throat → otolaryngologist (ear pain, hearing, nose problems, throat pain, sinus, ENT issues, sore throat, hoarseness)
-6. Heart/cardiovascular → cardiologist (chest pain, heart problems, cardiac issues, shortness of breath, palpitations, hypertension, blood pressure)
-7. Stomach/digestive → gastroenterologist (stomach pain, nausea, vomiting, diarrhea, digestive issues, GI problems, acid reflux, IBS, ulcers)
-8. Urinary/genital (male) → urologist (urinary problems, bladder issues, kidney problems, testicular pain, "balls hurt", genitourinary issues)
-9. Bones/joints → orthopedic (bone pain, joint pain, fractures, back pain, spine issues, knee, hip, shoulder, arthritis, broken bones)
-10. Urgent/emergency → urgent care (urgent needs, injuries, cuts, burns, immediate care, emergency, walk-in needed)
-11. Women's health → gynecologist (women's health, gynecology, OBGYN, pregnancy, prenatal, menstrual issues, pap smear, mammogram)
-12. Children → pediatrician (child health, pediatric, babies, kids, toddler health issues)
-13. General/vague → null (general checkup, routine visit, no specific symptoms, unclear issues)
+CRITICAL: Return ONLY one of these exact specialty names (lowercase, no punctuation):
+- psychiatrist
+- dermatologist
+- dentist
+- ophthalmologist
+- otolaryngologist
+- cardiologist
+- gastroenterologist
+- urologist
+- orthopedic
+- urgent care
+- gynecologist
+- pediatrician
+- null (only if symptoms are too vague or general checkup)
 
-Return ONLY the exact specialty name or "null". Be precise and consider the primary complaint.`
+SPECIALTY MAPPING RULES:
+1. Mental/psychological → psychiatrist
+   Examples: depression, anxiety, panic attacks, PTSD, bipolar, OCD, mood swings, suicidal thoughts, therapy, counseling, mental health
+
+2. Skin/hair/nails → dermatologist
+   Examples: rash, acne, moles, skin cancer, eczema, psoriasis, warts, hives, hair loss, nail problems, dermatitis
+
+3. Teeth/gums/mouth → dentist
+   Examples: tooth pain, cavity, gum bleeding, root canal, extraction, braces, dental cleaning, oral pain
+
+4. Eyes/vision → ophthalmologist
+   Examples: eye pain, vision problems, blurry vision, eye exam, glasses, contacts, cataracts, glaucoma, eye infection
+
+5. Ear/nose/throat → otolaryngologist
+   Examples: ear pain, hearing loss, sore throat, sinus problems, nosebleeds, hoarseness, tonsillitis, ENT issues
+
+6. Heart/cardiovascular → cardiologist
+   Examples: chest pain, heart palpitations, shortness of breath, high blood pressure, heart attack, cardiac issues
+
+7. Stomach/digestive → gastroenterologist
+   Examples: stomach pain, nausea, vomiting, diarrhea, constipation, acid reflux, IBS, ulcers, digestive problems
+
+8. Urinary/kidney (male) → urologist
+   Examples: urinary problems, bladder issues, kidney stones, testicular pain, prostate problems, urinary tract infection
+
+9. Bones/joints/muscles → orthopedic
+   Examples: bone pain, joint pain, back pain, knee pain, hip pain, fractures, arthritis, broken bone, sprain
+
+10. Urgent/emergency → urgent care
+    Examples: injury, cut, burn, urgent need, emergency, walk-in needed, immediate care, accident
+
+11. Women's health → gynecologist
+    Examples: pregnancy, prenatal, menstrual problems, pap smear, mammogram, women's health, OBGYN, gynecology
+
+12. Children/babies → pediatrician
+    Examples: child health, baby, toddler, pediatric, kids, children's health
+
+13. Too vague/general → null
+    Examples: general checkup, routine visit, annual exam, no specific symptoms
+
+Analyze the symptoms carefully and return the most specific specialty. If multiple specialties could apply, choose the one that best matches the PRIMARY complaint.`
         },
         {
           role: 'user',
           content: `Patient symptoms: "${s}"
 
-What specialty should treat this? Return only the specialty name or "null".`
+What is the most appropriate medical specialty? Return ONLY the specialty name (lowercase) or "null".`
         }
       ]
     });
     
-    const result = (resp.choices?.[0]?.message?.content || '').trim().toLowerCase();
+    const rawResult = (resp.choices?.[0]?.message?.content || '').trim().toLowerCase();
+    console.log(`[inferSpecialty] Raw AI response: "${rawResult}"`);
     
-    // Clean up the result - remove any extra text
-    const cleaned = result.replace(/[^a-z\s]/g, '').trim();
+    // Clean up the result - remove any extra text, punctuation, but keep spaces for "urgent care"
+    let cleaned = rawResult.replace(/[^a-z\s]/g, '').trim();
+    
+    // Handle "urgent care" as two words
+    if (cleaned.includes('urgent') && cleaned.includes('care')) {
+      cleaned = 'urgent care';
+    }
     
     // Validate the result is one of our specialties
     const validSpecialties = [
@@ -400,18 +447,31 @@ What specialty should treat this? Return only the specialty name or "null".`
       'orthopedic', 'urgent care', 'gynecologist', 'pediatrician', 'null'
     ];
     
-    // Check if cleaned result matches any valid specialty
-    const matched = validSpecialties.find(spec => cleaned.includes(spec) || spec.includes(cleaned));
+    // Check for exact match first
+    let matched = validSpecialties.find(spec => cleaned === spec);
+    
+    // If no exact match, try partial matching
+    if (!matched) {
+      matched = validSpecialties.find(spec => {
+        // For multi-word specialties, check if both words are present
+        if (spec === 'urgent care') {
+          return cleaned.includes('urgent') && cleaned.includes('care');
+        }
+        // For single-word specialties, check if the specialty word is in the cleaned result
+        return cleaned.includes(spec) || spec.includes(cleaned);
+      });
+    }
     
     if (matched) {
-      const result = matched === 'null' ? null : matched;
+      const finalResult = matched === 'null' ? null : matched;
+      console.log(`[inferSpecialty] Matched specialty: "${finalResult}" for symptoms: "${s}"`);
       // Cache the result
-      specialtyCache.set(cacheKey, result);
-      return result;
+      specialtyCache.set(cacheKey, finalResult);
+      return finalResult;
     }
     
     // Fallback to null if AI returns something unexpected
-    console.warn(`AI returned unexpected specialty: "${result}" (cleaned: "${cleaned}") for symptoms: "${s}"`);
+    console.warn(`[inferSpecialty] AI returned unexpected specialty: "${rawResult}" (cleaned: "${cleaned}") for symptoms: "${s}"`);
     // Cache null result too
     specialtyCache.set(cacheKey, null);
     return null;
@@ -473,9 +533,9 @@ function estimateCost(specialty, zip) {
 function getCostRating(specialty, zip) {
   if (!specialty) return '';
   const cost = estimateCost(specialty, zip);
-  if (cost.avg < 200) return '$';
-  if (cost.avg <= 350) return '$$';
-  return '$$$';
+  const rating = cost.avg < 200 ? '$' : (cost.avg <= 350 ? '$$' : '$$$');
+  console.log(`[getCostRating] Specialty: ${specialty}, Avg cost: $${cost.avg}, Rating: ${rating}`);
+  return rating;
 }
 
 async function findClinics(zip, specialty = null, symptoms = '') {
@@ -1478,8 +1538,8 @@ app.post('/chat/web', async (req, res) => {
                 ? specialtyNames[clinic.specialty] || clinic.specialty 
                 : 'General Practice';
 
-              // Get cost rating
-              const costRating = !s.insuranceY && specialty ? getCostRating(specialty, s.zip) : '';
+              // Get cost rating (use stored specialty from session for consistency)
+              const costRating = !s.insuranceY && s.inferredSpecialty ? getCostRating(s.inferredSpecialty, s.zip) : '';
 
               const clinicNum = i + 1;
               // Format: Option X: Clinic Name | Specialty | Cost Rating
